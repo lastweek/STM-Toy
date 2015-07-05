@@ -305,7 +305,7 @@ void tm_write_addr(void *addr, char new)
 		typeof(TMOBJECT) __v = (VALUE);				\
 		typeof(TMOBJECT) *__vp = &__v;				\
 		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
-			__c = (char *)*__vp;					\
+			__c = *((char *)__vp);					\
 			TM_WRITE_ADDR(__addr, __c);				\
 			__addr++; __vp++; __i++;				\
 		}											\
@@ -315,13 +315,15 @@ int main(void)
 {
 	char share = 'A';
 	char c;
-	int shint = 100;
+	int shint = 0x1234;
 	int t;
 
 	__TM_START__ {
 		
 		t = TM_READ(shint);
 		
+		TM_WRITE(shint, 0x5678);
+
 	} __TM_END__
 	
 	printf("%d\n", t);
