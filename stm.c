@@ -53,11 +53,17 @@ static void tm_contention_manager(struct transaction *t)
 {
 	switch (DEFAULT_CM_POLICY) {
 		case CM_AGGRESSIVE:
+			if (tm_read_status(t) == TM_COMMITING) {
+				/* Conflicting transaction is commiting. In order to
+				   avoid inconsistency state, abort is really safe */
+				tm_abort();
+			}
 			tm_set_status(t, TM_ABORT);
 			break;
 		case CM_POLITE:
 			/* Backoff to be gentleman */
 			/* Future */
+			wait();
 			break;
 	};
 }
@@ -95,6 +101,13 @@ static struct orec *hash_addr_to_orec(void *addr)
 	return NULL;
 }
 
+#define DELAY_LOOPS	50
+void tm_wait(void)
+{
+	for (i = 0; i < DELAY_LOOPS; i++) {
+		asm ("nop");
+	}
+}
 
 void tm_start(struct transaction *t)
 {
