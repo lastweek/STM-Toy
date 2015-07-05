@@ -49,31 +49,17 @@ static void orec_set_new(struct orec *r, char new)
 	r->new = new;
 }
 
-static void tm_contention_manager(struct transaction *t)
-{
-	switch (DEFAULT_CM_POLICY) {
-		case CM_AGGRESSIVE:
-			if (tm_read_status(t) == TM_COMMITING) {
-				/* Conflicting transaction is commiting. In order to
-				   avoid inconsistency state, abort is really safe */
-				tm_abort();
-			}
-			tm_set_status(t, TM_ABORT);
-			break;
-		case CM_POLITE:
-			/* Backoff to be gentleman */
-			/* Future */
-			wait();
-			break;
-	};
-}
-
 static int is_committed(struct transaction *t)
 {
 	return tm_read_status(t) == TM_COMMITED;
 }
 
 
+/**
+ * add_after_head - add @new after @ws->head
+ * @ws:  write data set
+ * @new: new entry added into data set
+ */
 static void add_after_head(struct write_set *ws, struct w_entry *new)
 {
 	struct w_entry *tmp;
@@ -95,6 +81,16 @@ static void add_after_head(struct write_set *ws, struct w_entry *new)
 	new->next = tmp;
 }
 
+/*
+ * hash_addr_to_orec
+ * @addr: the addr used to hash
+ * return: hashed orec in hashtable
+ *
+ * STM system should keep a hashtable to maintain all
+ * ownership records used by an active transaction.
+ * After a transaction commit, hashtable should free
+ * all transaction relevent records.
+ */
 //FIXME
 static struct orec *hash_addr_to_orec(void *addr)
 {
@@ -104,6 +100,7 @@ static struct orec *hash_addr_to_orec(void *addr)
 #define DELAY_LOOPS	50
 void tm_wait(void)
 {
+	int i;
 	for (i = 0; i < DELAY_LOOPS; i++) {
 		asm ("nop");
 	}
@@ -141,8 +138,7 @@ int tm_commit(void)
 		for (we = trans.ws.head; we != NULL; ) {
 			rec = we->rec;
 			*(char *)we->addr = rec->new;
-			/* Free orec. It is not efficiency, but easy to do */
-			clean = we;
+			clean = we; /* clean up */
 			we = we->next;
 			free(clean);
 		}
@@ -161,6 +157,25 @@ int tm_validate(void)
 	return tm_read_status(&trans) == TM_ACTIVE;
 }
 
+void tm_contention_manager(struct transaction *t)
+{
+	switch (DEFAULT_CM_POLICY) {
+		case CM_AGGRESSIVE:
+			if (tm_read_status(t) == TM_COMMITING) {
+				/* Conflicting transaction is commiting. In order to
+				   avoid inconsistency state, abort is really safe */
+				tm_abort();
+			}
+			tm_set_status(t, TM_ABORT);
+			break;
+		case CM_POLITE:
+			/* Backoff to be gentleman */
+			/* Future */
+			tm_wait();
+			break;
+	};
+}
+
 /**
  * tm_read_addr - Read a byte from TM
  * @addr:	Address of the byte
@@ -175,7 +190,7 @@ char tm_read_addr(void *addr)
 	/* Hash addr to get its ownership record */
 	rec = hash_addr_to_orec(addr);
 
-	/* DEBUG: Suppose we got orec already! */
+	/* FIXME: use oa for test*/
 	rec = &oa;
 	
 	if ((rec->owner != NULL) && (rec->owner != &trans))
@@ -219,7 +234,7 @@ void tm_write_addr(void *addr, char new)
 	/* Hash addr to get its ownership record */
 	rec = hash_addr_to_orec(addr);
 
-	/* DEBUG: Suppose we got orec too .. */
+	/* FIXME: use oa for test*/
 	rec = &oa;
 	
 	if ((rec->owner != NULL) && (rec->owner != &trans))
@@ -269,24 +284,46 @@ void tm_write_addr(void *addr, char new)
 #define TM_READ_ADDR(a)		tm_read_addr(a)
 #define TM_WRITE_ADDR(a,v)	tm_write_addr(a,v)
 
+#define TM_READ(TMOBJECT)							\
+	({												\
+		int __i; char __c; char *__addr;			\
+		typeof(TMOBJECT)  __ret;					\
+		typeof(TMOBJECT) *__retp;					\
+		__addr = (char *)&(TMOBJECT);				\
+		__retp = &(__ret);							\
+		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
+			__c = TM_READ_ADDR(__addr);				\
+			*__retp = __c;							\
+			__addr++; __retp++; __i++;				\
+		}											\
+		__ret;										\
+	})
+
+#define TM_WRITE(TMOBJECT, VALUE)					\
+	{												\
+		int __i; char __c; char *__addr;			\
+		typeof(TMOBJECT) __v = (VALUE);				\
+		typeof(TMOBJECT) *__vp = &__v;				\
+		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
+			__c = (char *)*__vp;					\
+			TM_WRITE_ADDR(__addr, __c);				\
+			__addr++; __vp++; __i++;				\
+		}											\
+	}
+
 int main(void)
 {
 	char share = 'A';
 	char c;
-	int t=1;
+	int shint = 100;
+	int t;
 
 	__TM_START__ {
 		
-		c = TM_READ_ADDR(&share);
+		t = TM_READ(shint);
 		
-		TM_WRITE_ADDR(&share, 'B');
-		
-		printf("%c\n", share);
-		
-		TM_COMMIT();
-
 	} __TM_END__
 	
-	printf("%c\n", share);
+	printf("%d\n", t);
 	return 0;
 }

@@ -108,4 +108,13 @@ struct orec {
 	char pad[2];
 };
 
+void tm_wait(void);
+void tm_start(struct transaction *t);
+void tm_abort(void);
+int tm_commit(void);
+int tm_validate(void);
+char tm_read_addr(void *addr);
+void tm_write_addr(void *addr, char new);
+void tm_contention_manager(struct transaction *t);
+
 #endif /* _SYZ_STM_H_ */

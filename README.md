@@ -1,8 +1,8 @@
-# STM
-Software Transactional Memory
+#Software Transactional Memory
 
-It is far away from a STM system. ;)
+This project is far away from a STM system. ;)
 
-It is merely a STM prototype, with some basic implementation of STM system.
+It is merely a immature STM prototype, only with
+some basic implementation of a STM system.
 
 There are some other robust STM systems, such as tinySTM, DSTM.
