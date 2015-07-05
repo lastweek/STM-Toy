@@ -17,7 +17,8 @@
  */
 
 struct transaction trans;	// Assume this is the per-thread transaction
-struct orec	oa;
+struct orec	oa[4];
+int cnt=0;
 
 /* FIXME Multithreads scalability! */
 static void tm_set_status(struct transaction *t, int status)
@@ -191,7 +192,7 @@ char tm_read_addr(void *addr)
 	rec = hash_addr_to_orec(addr);
 
 	/* FIXME: use oa for test*/
-	rec = &oa;
+	rec = &oa[cnt%4]; cnt++;
 	
 	if ((rec->owner != NULL) && (rec->owner != &trans))
 		tm_contention_manager(rec->owner);
@@ -200,6 +201,9 @@ char tm_read_addr(void *addr)
 		/* Maybe write data set already has a entry,
 		   but that is ok, cause write entry dont have
 		   any new data, ownership record has! */
+		#ifdef TM_DEBUG
+			printf("R_Old %p %x\n", addr, rec->new);
+		#endif
 		return rec->new;
 	}
 
@@ -218,6 +222,10 @@ char tm_read_addr(void *addr)
 	add_after_head(&(rec->owner->ws), we);
 	rec->owner->ws.nr_entries += 1;
 	
+	#ifdef TM_DEBUG
+		printf("R_New %p %x\n", addr, data);
+	#endif
+
 	return data;
 }
 
@@ -235,13 +243,17 @@ void tm_write_addr(void *addr, char new)
 	rec = hash_addr_to_orec(addr);
 
 	/* FIXME: use oa for test*/
-	rec = &oa;
+	rec = &oa[cnt%4]; cnt++;
 	
 	if ((rec->owner != NULL) && (rec->owner != &trans))
 		tm_contention_manager(rec->owner);
 	
-	if (rec->owner == &trans)
+	if (rec->owner == &trans) {
+		#ifdef TM_DEBUG
+			printf("W_Old %p %x\n", addr, new);
+		#endif
 		orec_set_new(rec, new);
+	}
 	else {
 		/* Update orec */
 		/* Note: Every threads can modify orec */
@@ -257,6 +269,10 @@ void tm_write_addr(void *addr, char new)
 		we->rec  = rec;
 		add_after_head(&(rec->owner->ws), we);
 		rec->owner->ws.nr_entries += 1;
+		
+		#ifdef TM_DEBUG
+			printf("W_New %p %x\n", addr, new);
+		#endif
 	}
 }
 
@@ -284,48 +300,63 @@ void tm_write_addr(void *addr, char new)
 #define TM_READ_ADDR(a)		tm_read_addr(a)
 #define TM_WRITE_ADDR(a,v)	tm_write_addr(a,v)
 
-#define TM_READ(TMOBJECT)							\
-	({												\
-		int __i; char __c; char *__addr;			\
-		typeof(TMOBJECT)  __ret;					\
-		typeof(TMOBJECT) *__retp;					\
-		__addr = (char *)&(TMOBJECT);				\
-		__retp = &(__ret);							\
-		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
-			__c = TM_READ_ADDR(__addr);				\
-			*__retp = __c;							\
-			__addr++; __retp++; __i++;				\
-		}											\
-		__ret;										\
+#define TM_READ(TMOBJECT)								\
+	({													\
+		int __i; char __c;								\
+		typeof(TMOBJECT)  __ret;						\
+		char *__retp = (char *)&(__ret);				\
+		char *__addr = (char *)&(TMOBJECT);				\
+		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
+			__c = TM_READ_ADDR(__addr);					\
+			*__retp = __c;								\
+			__addr++; __retp++; __i++;					\
+		}												\
+		__ret;											\
 	})
 
-#define TM_WRITE(TMOBJECT, VALUE)					\
-	{												\
-		int __i; char __c; char *__addr;			\
-		typeof(TMOBJECT) __v = (VALUE);				\
-		typeof(TMOBJECT) *__vp = &__v;				\
-		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
-			__c = *((char *)__vp);					\
-			TM_WRITE_ADDR(__addr, __c);				\
-			__addr++; __vp++; __i++;				\
-		}											\
+#define TM_WRITE(TMOBJECT, VALUE)						\
+	{													\
+		int __i; char __c;								\
+		typeof(TMOBJECT) __val = (VALUE);				\
+		char *__valp = (char *)&(__val);				\
+		char *__addr = (char *)&(TMOBJECT);				\
+		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
+			__c = *((char *)__valp);					\
+			TM_WRITE_ADDR(__addr, __c);					\
+			__addr++; __valp++; __i++;					\
+		}												\
 	}
+
+
+struct str {
+	char a;
+	char b;
+	char c;
+	char d;
+};
 
 int main(void)
 {
 	char share = 'A';
 	char c;
-	int shint = 0x1234;
-	int t;
-
+	int shint = 0x05060708;
+	int s, t;
+	struct str x, y;
+	struct str z = {.a='A', .b='B', .c='C', .d='D'};
+	
 	__TM_START__ {
 		
-		t = TM_READ(shint);
+		x = TM_READ(z);
+		y = TM_READ(z);
+
+		TM_WRITE(shint, 0x01020304);
+		TM_WRITE(shint, 0x04030201);
 		
-		TM_WRITE(shint, 0x5678);
+		TM_COMMIT();
 
 	} __TM_END__
-	
-	printf("%d\n", t);
+
+	printf("%c %c %c %c\n", x.a, x.b, x.c, x.d);
+	printf("%x\n", shint);
 	return 0;
 }
