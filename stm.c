@@ -276,58 +276,6 @@ void tm_write_addr(void *addr, char new)
 	}
 }
 
-/*
- *	STM API
- */
-#define __TM_START__					\
-	{									\
-		tm_start(&trans);				\
-		setjmp(trans.jb);				\
-	}
-
-#define __TM_END__						\
-	{									\
-		if (!is_committed(&trans)) {	\
-			longjmp(trans.jb, 1);		\
-		}								\
-		/* set end time maybe? */		\
-	}
-
-#define TM_ABORT()		tm_abort()
-#define TM_COMMIT()		tm_commit()
-#define TM_VALIDATE()	tm_validate()
-
-#define TM_READ_ADDR(a)		tm_read_addr(a)
-#define TM_WRITE_ADDR(a,v)	tm_write_addr(a,v)
-
-#define TM_READ(TMOBJECT)								\
-	({													\
-		int __i; char __c;								\
-		typeof(TMOBJECT)  __ret;						\
-		char *__retp = (char *)&(__ret);				\
-		char *__addr = (char *)&(TMOBJECT);				\
-		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
-			__c = TM_READ_ADDR(__addr);					\
-			*__retp = __c;								\
-			__addr++; __retp++; __i++;					\
-		}												\
-		__ret;											\
-	})
-
-#define TM_WRITE(TMOBJECT, VALUE)						\
-	{													\
-		int __i; char __c;								\
-		typeof(TMOBJECT) __val = (VALUE);				\
-		char *__valp = (char *)&(__val);				\
-		char *__addr = (char *)&(TMOBJECT);				\
-		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
-			__c = *((char *)__valp);					\
-			TM_WRITE_ADDR(__addr, __c);					\
-			__addr++; __valp++; __i++;					\
-		}												\
-	}
-
-
 struct str {
 	char a;
 	char b;
