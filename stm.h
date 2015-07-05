@@ -4,7 +4,7 @@
 /*
  * Contention Policy
  * 
- * AGGRESIVE is an obstruction-free implementation.
+ * AGGRESSIVE is an obstruction-free implementation.
  * The transaction just abort all other transactions
  * that holds the orec of the data that this transaction
  * want to access.
@@ -14,11 +14,11 @@
  * conflict. The waiting time is exponential growth.
  */
 enum {
-	CM_AGGRESIVE,
+	CM_AGGRESSIVE,
 	CM_POLITE
 };
 
-#define DEFAULT_CM_POLICY	CM_AGGRESIVE
+#define DEFAULT_CM_POLICY	CM_AGGRESSIVE
 
 /*
  * Transaction Status

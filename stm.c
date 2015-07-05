@@ -43,7 +43,7 @@ static void orec_set_new(struct orec *r, char new)
 static void tm_contention_manager(struct transaction *t)
 {
 	switch (DEFAULT_CM_POLICY) {
-		case CM_AGGRESIVE:
+		case CM_AGGRESSIVE:
 			tm_set_status(t, TM_ABORT);
 			break;
 		case CM_POLITE:
