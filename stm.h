@@ -1,6 +1,11 @@
 #ifndef _SYZ_STM_H_
 #define _SYZ_STM_H_
 
+#include <setjmp.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
 /*
  *	STM API
  *
