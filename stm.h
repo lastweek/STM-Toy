@@ -11,7 +11,7 @@
  *
  * POLITE is an more gentle implementation.
  * The transaction will wait a moment when encounter a
- * conflict. The waiting time is exponential growth.
+ * conflict. The waiting time has a exponential growth.
  */
 enum {
 	CM_AGGRESSIVE,
@@ -22,17 +22,19 @@ enum {
 
 /*
  * Transaction Status
- * A transaction is ACTIVE once it starts.
- * A transaction is COMMITED when TM_COMMIT() succeed.
- * A transaction is ABORT after
- *  i)  call TM_ABORT itself
- *  ii) conflict with other transaction
+ * A transaction is ACTIVE once it starts, until ABORT or COMMIT
+ * A transaction is COMMITING when TM_COMMIT() is flushing dirty data.
+ * A transaction is COMMITED when TM_COMMIT() has finished and succeed.
+ * A transaction is ABORT when two actions happened:
+ *  i)  call TM_ABORT() itself
+ *  ii) ABORT by the conflicting transaction
  */
 enum TM_STATUS {
-	TM_NULL		= 0,
-	TM_ACTIVE	= 1,
-	TM_COMMITED	= 2,
-	TM_ABORT	= 3
+	TM_NULL,
+	TM_ACTIVE,
+	TM_COMMITING,
+	TM_COMMITED,
+	TM_ABORT
 };
 
 /*
@@ -43,6 +45,7 @@ enum TM_STATUS {
 struct r_entry {
 	char *addr;
 	struct orec *rec;
+	struct r_entry *next;
 };
 
 /*
@@ -51,8 +54,9 @@ struct r_entry {
  * transaction has a write data entry.
  */
 struct w_entry {
-	char *addr;
+	void *addr;
 	struct orec *rec;
+	struct w_entry *next;
 };
 
 /*
@@ -61,7 +65,7 @@ struct w_entry {
  * form the read data set of that transaction.
  */
 struct read_set {
-	struct r_entry *rlist;
+	struct r_entry *head;
 	int nr_entries;
 };
 
@@ -71,7 +75,7 @@ struct read_set {
  * form the write data set of that transaction.
  */
 struct write_set {
-	struct w_entry *wlist;
+	struct w_entry *head;
 	int nr_entries;
 };
 

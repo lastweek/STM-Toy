@@ -15,8 +15,8 @@
  * And for now i do not have a hashtable to hash addt to orec.
  * Only a global struct orec oa is used to test!
  */
-// FIXME
-struct transaction trans;
+
+struct transaction trans;	// Assume this is the per-thread transaction
 struct orec	oa;
 
 /* FIXME Multithreads scalability! */
@@ -68,6 +68,34 @@ static int is_committed(struct transaction *t)
 }
 
 
+static void add_after_head(struct write_set *ws, struct w_entry *new)
+{
+	struct w_entry *tmp;
+	
+	if (ws->head == NULL) {
+		ws->head = new;
+		new->next = NULL;
+		return;
+	}
+	
+	if (ws->head->next == NULL) {
+		ws->head->next = new;
+		new->next = NULL;
+		return;
+	}
+
+	tmp = ws->head->next;
+	ws->head->next = new;
+	new->next = tmp;
+}
+
+//FIXME
+static struct orec *hash_addr_to_orec(void *addr)
+{
+	return NULL;
+}
+
+
 void tm_start(struct transaction *t)
 {
 	memset(t, 0, sizeof(struct transaction));
@@ -85,14 +113,26 @@ void tm_abort(void)
  */
 int tm_commit(void)
 {
-	int status, d;
+	int status;
+	struct w_entry *we, *clean;
+	struct orec *rec;
 	
 	status = tm_read_status(&trans);
 	if (status == TM_ABORT)
 		return 1;
 	
-	/* Data write back */
 	if (status == TM_ACTIVE) {
+		/* Now it is time to write back the dirty data
+		 * that have been modified by this transaction. */
+		tm_set_status(&trans, TM_COMMITING);
+		for (we = trans.ws.head; we != NULL; ) {
+			rec = we->rec;
+			*(char *)we->addr = rec->new;
+			/* Free orec. It is not efficiency, but easy to do */
+			clean = we;
+			we = we->next;
+			free(clean);
+		}
 		tm_set_status(&trans, TM_COMMITED);
 	}
 	
@@ -117,8 +157,10 @@ char tm_read_addr(void *addr)
 {
 	char data;
 	struct orec *rec;
+	struct w_entry *we;
 	
-	/* DEBUG: Hash addr to get orec! */ 
+	/* Hash addr to get its ownership record */
+	rec = hash_addr_to_orec(addr);
 
 	/* DEBUG: Suppose we got orec already! */
 	rec = &oa;
@@ -126,13 +168,27 @@ char tm_read_addr(void *addr)
 	if ((rec->owner != NULL) && (rec->owner != &trans))
 		tm_contention_manager(rec->owner);
 	
-	if (rec->owner == &trans)
+	if (rec->owner == &trans) {
+		/* Maybe write data set already has a entry,
+		   but that is ok, cause write entry dont have
+		   any new data, ownership record has! */
 		return rec->new;
+	}
 
+	/* Update orec */
+	/* Note: Every threads can modify orec */
 	data = *(char *)addr;
 	orec_set_owner(rec, &trans);
 	orec_set_old(rec, data);
 	orec_set_new(rec, data);
+	
+	/* Update transaction write data set */
+	/* Note: Transaction belongs to a single thread */
+	we = (struct w_entry *)malloc(sizeof(struct w_entry));
+	we->addr = addr;
+	we->rec  = rec;
+	add_after_head(&(rec->owner->ws), we);
+	rec->owner->ws.nr_entries += 1;
 	
 	return data;
 }
@@ -145,8 +201,10 @@ void tm_write_addr(void *addr, char new)
 {
 	char old;
 	struct orec *rec;
+	struct w_entry *we;
 
-	/* DEBUG: Hash addr to get orec! */
+	/* Hash addr to get its ownership record */
+	rec = hash_addr_to_orec(addr);
 
 	/* DEBUG: Suppose we got orec too .. */
 	rec = &oa;
@@ -164,10 +222,13 @@ void tm_write_addr(void *addr, char new)
 		orec_set_old(rec, old);
 		orec_set_new(rec, new);
 		
-		/* Update transaction data set */
+		/* Update transaction write data set */
 		/* Note: Transaction belongs to a single thread */
-
-		
+		we = (struct w_entry *)malloc(sizeof(struct w_entry));
+		we->addr = addr;
+		we->rec  = rec;
+		add_after_head(&(rec->owner->ws), we);
+		rec->owner->ws.nr_entries += 1;
 	}
 }
 
@@ -185,7 +246,7 @@ void tm_write_addr(void *addr, char new)
 		if (!is_committed(&trans)) {	\
 			longjmp(trans.jb, 1);		\
 		}								\
-		/* set end time */				\
+		/* set end time maybe? */		\
 	}
 
 #define TM_ABORT()		tm_abort()
@@ -201,18 +262,18 @@ int main(void)
 	char c;
 	int t=1;
 
-	TM_START {
+	__TM_START__ {
 		
 		c = TM_READ_ADDR(&share);
-		printf("%c\n", c);
 		
 		TM_WRITE_ADDR(&share, 'B');
-		c = TM_READ_ADDR(&share);
-		printf("%c\n", c);
+		
+		printf("%c\n", share);
 		
 		TM_COMMIT();
 
-	} TM_END
-
+	} __TM_END__
+	
+	printf("%c\n", share);
 	return 0;
 }
