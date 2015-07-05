@@ -30,13 +30,13 @@ struct w_entry {
 /* Read Data Set in Transaction */
 struct r_set {
 	struct r_entry *rlist;
-	int nr_entries
+	int nr_entries;
 };
 
 /* Write Data Set in Transaction */
 struct w_set {
 	struct w_entry *wlist;
-	int nr_entries
+	int nr_entries;
 };
 
 /* Transaction Descriptor */
@@ -49,12 +49,12 @@ struct transaction {
 	int end_time;
 };
 
-static inline void tm_set_status(struct transaction *t, int status)
+static void tm_set_status(struct transaction *t, int status)
 {
 	t->status = status;
 }
 
-static inline int tm_read_status(struct transaction *t)
+static int tm_read_status(struct transaction *t)
 {
 	return t->status;
 }
@@ -90,7 +90,7 @@ int tm_validate(void)
 
 void tm_abort(void)
 {
-	tm_set_status(trans.status, TM_ABORT);
+	tm_set_status(&trans, TM_ABORT);
 }
 
 /**
@@ -100,7 +100,7 @@ void tm_abort(void)
  */
 char tm_read_addr(void *addr)
 {
-
+	return *(char *)addr;
 }
 
 /**
@@ -125,10 +125,12 @@ void tm_write_addr(void *addr)
 
 int main(void)
 {
+	char share = 'A';
 	__TM_START__ {
-		printf("%d\n", __t.status);
+		TM_READ_ADDR(&share);
 	}
 
+	printf("%c\n", share);
 	return 0;
 }
 
