@@ -1,84 +1,42 @@
 #include <stdio.h>
 #include <string.h>
 #include <setjmp.h>
+#include "stm.h"
 
 /* FIXME Tentative Global...
  * For now, assume that one thread only
- * have one struct transaction instance */
+ * have one struct transaction instance.
+ * And should use hashtable to index orec. */
 struct transaction trans;
+struct orec	oa, ob;
 
-/* Contention Policy */
-enum CM_POLICY {
-	CM_AGGRESIVE,
-	CM_POLITE
-};
-
-/* Transaction Status */
-enum TM_STATUS {
-	TM_NULL		= 0,
-	TM_ACTIVE	= 1,
-	TM_COMMITED	= 2,
-	TM_ABORT	= 3
-};
-
-/* Read Data Entry in Read-Set */
-struct r_entry {
-
-};
-
-/* Write Data Entry in Write-Set */
-struct w_entry {
-
-};
-
-/* Read-Set in Transaction */
-struct read_set {
-	struct r_entry *rlist;
-	int nr_entries;
-};
-
-/* Write-Set in Transaction */
-struct write_set {
-	struct w_entry *wlist;
-	int nr_entries;
-};
-
-/* Transaction Descriptor */
-struct transaction {
-	jmp_buf jb;
-	volatile int status;
-	struct read_set  rs;
-	struct write_set ws;
-	int start_time;
-	int end_time;
-};
-
-/* Ownership record for every TM byte */
-struct ownership_record {
-	struct transaction *owner;
-	int version;
-	char old;
-	char new;
-};
-
+/* FIXME Multithreads scalability! */
 static void tm_set_status(struct transaction *t, int status)
 {
 	t->status = status;
 }
 
+/* FIXME Multithreads scalability! */
 static int tm_read_status(struct transaction *t)
 {
 	return t->status;
 }
 
-/**
- * tm_start - TM start and initialize
- * @t:	transaction descriptor
- */
+/* FIXME Multithreads scalability! */
+static void orec_set_owner(struct orec *r, struct transaction *t)
+{
+	r->owner = t;
+};
+
 void tm_start(struct transaction *t)
 {
 	memset(t, 0, sizeof(struct transaction));
 	tm_set_status(t, TM_ACTIVE);
+
+void tm_abort(void)
+{
+	tm_set_status(&trans, TM_ABORT);
+}
 }
 
 /**
@@ -106,11 +64,6 @@ int tm_validate(void)
 	return (status == TM_ACTIVE);
 }
 
-void tm_abort(void)
-{
-	tm_set_status(&trans, TM_ABORT);
-}
-
 /**
  * tm_read_addr - Read a byte from TM
  * @addr:	Address of the byte
@@ -118,8 +71,17 @@ void tm_abort(void)
  */
 char tm_read_addr(void *addr)
 {
-	/* Map to orec */
+	struct orec *rec;
+	
+	/* Hash addr to get orec! */ 
 
+	/* DEBUG: Suppose we got orec already! */
+	rec = &oa;
+	
+	if (rec.owner != NULL)
+		tm_contention_manager(rec.owner);
+	
+	orec_set_owner(rec, &trans);
 
 	return *(char *)addr;
 }
@@ -133,7 +95,20 @@ void tm_write_addr(void *addr)
 
 }
 
-
+void tm_contention_manager(struct transaction *t)
+{
+	switch (CM_POLICY) {
+		case CM_AGGRESIVE:
+			/* Make conflict transaction abort */
+			
+			break;
+		case CM_POLITE:
+			/* Backoff to be gentleman */
+			
+			break
+		default:
+	};
+}
 
 /* General Purpose STM Programming API */
 #define __TM_START__				\
