@@ -1,12 +1,21 @@
+#include <setjmp.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <setjmp.h>
+
 #include "stm.h"
 
-/* FIXME Tentative Global...
- * For now, assume that one thread only
- * have one struct transaction instance.
- * And should use hashtable to index orec. */
+/* 
+ * NOTE THAT: 
+ * Each thread only have one transaction descriptor instance.
+ * All transactions in a thread share a global descriptpor.
+ * I choose to design like that for simplicity, which leads to
+ * transactions can not nest.
+ *
+ * And for now i do not have a hashtable to hash addt to orec.
+ * Only a global struct orec oa is used to test!
+ */
+// FIXME
 struct transaction trans;
 struct orec	oa;
 
@@ -53,15 +62,21 @@ static void tm_contention_manager(struct transaction *t)
 	};
 }
 
+static int is_committed(struct transaction *t)
+{
+	return tm_read_status(t) == TM_COMMITED;
+}
+
+
 void tm_start(struct transaction *t)
 {
 	memset(t, 0, sizeof(struct transaction));
 	tm_set_status(t, TM_ACTIVE);
+}
 
 void tm_abort(void)
 {
 	tm_set_status(&trans, TM_ABORT);
-}
 }
 
 /**
@@ -70,21 +85,18 @@ void tm_abort(void)
  */
 int tm_commit(void)
 {
-	int status;
+	int status, d;
 	
 	status = tm_read_status(&trans);
 	if (status == TM_ABORT)
 		return 1;
 	
-	tm_set_status(&trans, TM_COMMITED);
+	/* Data write back */
+	if (status == TM_ACTIVE) {
+		tm_set_status(&trans, TM_COMMITED);
+	}
+	
 	return 0;
-}
-
-static int is_committed(struct transaction *t)
-{
-	int status;
-	status = tm_read_status(t);
-	return status == TM_COMMITED;
 }
 
 /**
@@ -93,9 +105,7 @@ static int is_committed(struct transaction *t)
  */
 int tm_validate(void)
 {
-	int status;
-	status = tm_read_status(&trans);
-	return (status == TM_ACTIVE);
+	return tm_read_status(&trans) == TM_ACTIVE;
 }
 
 /**
@@ -108,7 +118,7 @@ char tm_read_addr(void *addr)
 	char data;
 	struct orec *rec;
 	
-	/* Hash addr to get orec! */ 
+	/* DEBUG: Hash addr to get orec! */ 
 
 	/* DEBUG: Suppose we got orec already! */
 	rec = &oa;
@@ -136,7 +146,7 @@ void tm_write_addr(void *addr, char new)
 	char old;
 	struct orec *rec;
 
-	/* Hash addr to get orec! */
+	/* DEBUG: Hash addr to get orec! */
 
 	/* DEBUG: Suppose we got orec too .. */
 	rec = &oa;
@@ -147,30 +157,35 @@ void tm_write_addr(void *addr, char new)
 	if (rec->owner == &trans)
 		orec_set_new(rec, new);
 	else {
+		/* Update orec */
+		/* Note: Every threads can modify orec */
 		old = *(char *)addr;
 		orec_set_owner(rec, &trans);
 		orec_set_old(rec, old);
 		orec_set_new(rec, new);
+		
+		/* Update transaction data set */
+		/* Note: Transaction belongs to a single thread */
+
+		
 	}
 }
 
 /*
  *	STM API
  */
-#define __TM_START__				\
-	{								\
-		tm_start(&trans);			\
-		setjmp(trans.jb);			\
+#define __TM_START__					\
+	{									\
+		tm_start(&trans);				\
+		setjmp(trans.jb);				\
 	}
 
-#define __TM_END__					\
-	{								\
-		if (!is_committed(&trans))	\
-		{							\
-			/* STM Restart */		\
-			longjmp(trans.jb, 1);	\
-		}							\
-		/* set end time */			\
+#define __TM_END__						\
+	{									\
+		if (!is_committed(&trans)) {	\
+			longjmp(trans.jb, 1);		\
+		}								\
+		/* set end time */				\
 	}
 
 #define TM_ABORT()		tm_abort()
@@ -186,7 +201,7 @@ int main(void)
 	char c;
 	int t=1;
 
-	__TM_START__ {
+	TM_START {
 		
 		c = TM_READ_ADDR(&share);
 		printf("%c\n", c);
@@ -194,13 +209,10 @@ int main(void)
 		TM_WRITE_ADDR(&share, 'B');
 		c = TM_READ_ADDR(&share);
 		printf("%c\n", c);
-	
+		
 		TM_COMMIT();
-	}__TM_END__
+
+	} TM_END
 
 	return 0;
 }
-
-
-
-

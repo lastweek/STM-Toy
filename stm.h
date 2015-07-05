@@ -41,7 +41,8 @@ enum TM_STATUS {
  * transaction has read data entry.
  */
 struct r_entry {
-
+	char *addr;
+	struct orec *rec;
 };
 
 /*
@@ -50,7 +51,8 @@ struct r_entry {
  * transaction has a write data entry.
  */
 struct w_entry {
-
+	char *addr;
+	struct orec *rec;
 };
 
 /*
