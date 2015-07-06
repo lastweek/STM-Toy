@@ -34,13 +34,16 @@ Since every object has a pointer points to its owner transactionin
 in its ownership record, no overheads exist when a transaction
 is commiting.
 
-##FUTURE READING:
+#FUTURE READING:
 
 [Herlihy 93]
 Transactional Memory: Architectural Support for Lock-free Data Structures.
+
 [Shavit 95]
 Software Transactional Memory
+
 [Harris 03]
 Language Support for Lightweight Transactions
+
 [Herlihy 03]
 Software Transactional Memory for Dynamic-Sized Data Structures
