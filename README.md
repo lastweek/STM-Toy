@@ -1,7 +1,10 @@
 #Software Transactional Memory
 
+##A byte-based, time-based, obstruction-free STM.
+
 This is an immature prototype of STM system.
-I borrowed some ideas from DSTM and Hash Table STM.
+I borrowed some ideas from DSTM, Hash Table STM,
+tinySTM and some other mature STM systems.
 
 Like Hash Table STM, we hash the address of
 the shared object to get the ownership record
