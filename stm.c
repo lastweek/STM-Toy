@@ -3,15 +3,13 @@
 /* 
  * NOTE THAT: 
  * Each thread only have one transaction descriptor instance.
- * All transactions in a thread share a global descriptpor.
+ * All transactions in a thread _share_ a global descriptpor.
  * I choose to design like that for simplicity, which leads to
  * transactions can not nest.
  */
 
-__thread struct stm_tx *thread_tx;
 
-#define GET_TX(tx) \
-	struct stm_tx *tx = get_tx()
+DEF_THREAD_LOCAL(struct stm_tx *, thread_tx);
 
 struct orec	oa[4];
 int cnt=0;
@@ -88,7 +86,7 @@ static struct orec *hash_addr_to_orec(void *addr)
 }
 
 #define DELAY_LOOPS	50
-void tm_wait(void)
+void stm_wait(void)
 {
 	int i;
 	for (i = 0; i < DELAY_LOOPS; i++) {
@@ -106,16 +104,44 @@ void tm_thread_init(void)
 	thread_tx = NULL;
 }
 
-static void stm_set_status(int status)
+static inline void
+stm_set_status(int status)
 {
 	GET_TX(tx);
-	atomic_write_int(&tx.status status);
+	atomic_write(&tx.status, status);
 }
 
-static int stm_read_status(void)
+static inline int
+stm_get_status(void)
 {
 	GET_TX(tx);
-	return atomic_read_int(&tx.status);
+	return atomic_read(&tx.status);
+}
+
+static inline void
+stm_set_abort_reason(int reason)
+{
+	GET_TX(tx);
+	atomic_write(&tx.abort_reason, reason);
+}
+
+static inline int
+stm_get_abort_reason(void)
+{
+	GET_TX(tx);
+	return atomic_read(&tx.abort_reason);
+}
+
+static inline void
+stm_set_status_tx(struct stm_tx *tx, int status)
+{
+	atomic_write(&tx.status, status);
+}
+
+static inline int
+stm_get_status_tx(struct stm_tx *tx)
+{
+	return atomic_read(&tx.status);
 }
 
 /*
@@ -149,102 +175,122 @@ void stm_start(void)
 	struct stm_tx *new_tx;
 	
 	/* Thread Global TX has initialized */
-	if (get_tx())
+	if (get_tx()) {
+		
 		return;
+	}
 	
 	new_tx = TX_MALLOC(sizeof(struct stm_tx));
 	new_tx->status = TM_ACTIVE;
 	new_tx->version = 0;
 	new_tx->start_tsp = current_tsp();
-
 	set_tx(new_tx);
 }
 
-void stm_abort(int reason)
+void stm_abort(void)
 {
-	stm_set_status(TM_ABORT);
-	stm_set_abort_reason(SELF_ABORT);
+	stm_set_status(STM_ABORT);
+	stm_set_abort_reason(STM_SELF_ABORT);
 }
 
 /**
- * tm_commit - Try to commit a transaction
+ * stm_commit - TRY to commit a transaction
  * Return: 0 means success, 1 means fails.
  */
-int tm_commit(void)
+int stm_commit(void)
 {
 	int status;
 	struct w_entry *we, *clean;
 	struct orec *rec;
 	
-	status = tm_read_status(&trans);
-	if (status == TM_ABORT)
-		return 1;
-	
-	if (status == TM_ACTIVE) {
+	/* COMPARE AND SWAP 
+	 * If current status is ACTIVE, then set current
+	 * status to COMMITING. A COMMITING transaction
+	 * can NOT be aborted by other transactions, in
+	 * other words, it is un-interruptable.
+	 */
+	GET_TX(tx);
+	if (atomic_cmpxchg(&tx.status, STM_ACTIVE, STM_COMMITING) == STM_ACTIVE) {
 		/* Now it is time to write back the dirty data
-		 * that have been modified by this transaction. */
-		tm_set_status(&trans, TM_COMMITING);
+		 * that have been modified by this transaction.
+		 * We are in COMMITING state, no one can abort us. */
 		for (we = trans.ws.head; we != NULL; ) {
 			rec = we->rec;
 			*(char *)we->addr = rec->new;
-			clean = we; /* clean up */
+			clean = we;
 			we = we->next;
 			free(clean);
 		}
-		tm_barrier();
-		tm_set_status(&trans, TM_COMMITED);
+		/* Wait until data flush out */
+		stm_barrier();
+		stm_set_status_tx(tx, TM_COMMITED);
+		return 0;
 	}
-	
-	return 0;
+	return 1;
 }
 
 /**
- * tm_validate - Check transaction status
- * Return: 0 means active, 1 means abort
+ * stm_validate - check transaction status
+ * ACTIVE, COMMITING and COMMITED indicate
+ * the transaction still alive.
+ * Return: 0 means alive, 1 means aborted
  */
-int tm_validate(void)
+int stm_validate(void)
 {
-	return tm_read_status(&trans) == TM_ACTIVE;
+	return stm_get_status() == STM_ABORT;
 }
 
-void tm_contention_manager(struct transaction *t)
+void stm_contention_manager(struct stm_tx *enemy)
 {
 	switch (DEFAULT_CM_POLICY) {
 		case CM_AGGRESSIVE:
-			if (tm_read_status(t) == TM_COMMITING) {
-				/* Conflicting transaction is commiting. In order to
-				   avoid inconsistency state, abort is really safe */
-				tm_abort();
+			if (stm_get_status_tx(enemy) == TM_COMMITING) {
+				/* As the promise we have made, this conflicting
+				 * transaction can NOT abort a COMMITING enemy.
+				 * Maybe abort himself or wait a moment ??TODO
+				 */
+				stm_abort();
 			}
-			tm_set_status(t, TM_ABORT);
+			/* Otherwise, abort enemy and set his abort reason. */
+			stm_set_status_tx(enemy, STM_ABORT);
+			stm_set_abort_reason_tx(enemy, STM_ENEMY_ABORT);
 			break;
 		case CM_POLITE:
-			/* Backoff to be gentleman */
 			/* Future */
-			tm_wait();
+			stm_wait();
 			break;
 	};
 }
 
 /**
- * tm_read_addr - Read a byte from TM
+ * stm_read_addr - Read a single BYTE from STM
  * @addr:	Address of the byte
- * Return:	byte dereferenced by @addr
+ * Return:	the date in @addr
  */
-char tm_read_addr(void *addr)
+char stm_read_char(void *addr)
 {
 	char data;
 	struct orec *rec;
 	struct w_entry *we;
 	
-	/* Hash addr to get its ownership record */
+	if (stm_get_status() == STM_ABORT) {
+		//TODO Restart transaction maybe?
+	}
+	
+	//FIXME
 	rec = hash_addr_to_orec(addr);
-
-	/* FIXME: use oa for test*/
 	rec = &oa[cnt%4]; cnt++;
 	
+	/* COMPARE AND SWAP
+	 * If no transaction owns this orec, than set
+	 * the owner of the orec to this transaction.
+	 */
+	GET_TX(tx);
+	if (atomic_cmpxchg(rec->owner, NULL, tx)) {
+		
+	}
 	if ((rec->owner != NULL) && (rec->owner != &trans))
-		tm_contention_manager(rec->owner);
+		stm_contention_manager(rec->owner);
 	
 	if (rec->owner == &trans) {
 		/* Maybe write data set already has a entry,
@@ -282,7 +328,7 @@ char tm_read_addr(void *addr)
  * tm_write_addr - Write a byte to TM
  * @addr:	Address of the byte
  */
-void tm_write_addr(void *addr, char new)
+void stm_write_char(void *addr, char new)
 {
 	char old;
 	struct orec *rec;

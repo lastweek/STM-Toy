@@ -73,6 +73,10 @@
 		}												\
 	}
 
+#define DEF_THREAD_LOCAL(TYPE, NAME)	__thread TYPE NAME
+#define GET_TX(tx)	struct stm_tx *tx = get_tx()
+
+
 /*
  * Unlike SigSTM, we can NOT guarantee strong isolation
  * between transactional and non-transactional code.
@@ -116,12 +120,17 @@ enum {
  *  i)  call TM_ABORT() itself
  *  ii) ABORT by the conflicting transaction
  */
-enum TM_STATUS {
-	TM_NULL,
-	TM_ACTIVE,
-	TM_COMMITING,
-	TM_COMMITED,
-	TM_ABORT
+enum STM_STATUS {
+	STM_NULL,
+	STM_ACTIVE,
+	STM_COMMITING,
+	STM_COMMITED,
+	STM_ABORT
+};
+
+enum STM_ABORT_REASON {
+	STM_SELF_ABORT,
+	STM_ENEMY_ABORT
 };
 
 /*
