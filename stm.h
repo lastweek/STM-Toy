@@ -43,8 +43,8 @@
 #define TM_VALIDATE()		stm_validate()
 #define TM_BARRIER()		stm_barrier()
 
-#define TM_READ_ADDR(a)		stm_read_addr(a)
-#define TM_WRITE_ADDR(a,v)	stm_write_addr(a,v)
+#define TM_READ_CHAR(a)		stm_read_char(a)
+#define TM_WRITE_CHAR(a,v)	stm_write_char(a,v)
 
 #define TM_READ(TMOBJECT)								\
 	({													\
@@ -53,7 +53,7 @@
 		char *__retp = (char *)&(__ret);				\
 		char *__addr = (char *)&(TMOBJECT);				\
 		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
-			__c = TM_READ_ADDR(__addr);					\
+			__c = stm_read_char(__addr);				\
 			*__retp = __c;								\
 			__addr++; __retp++; __i++;					\
 		}												\
@@ -68,28 +68,15 @@
 		char *__addr = (char *)&(TMOBJECT);				\
 		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
 			__c = *((char *)__valp);					\
-			TM_WRITE_ADDR(__addr, __c);					\
+			stm_write_char(__addr, __c);				\
 			__addr++; __valp++; __i++;					\
 		}												\
 	}
 
-#define DEF_THREAD_LOCAL(TYPE, NAME)	__thread TYPE NAME
-#define GET_TX(tx)	struct stm_tx *tx = get_tx()
-
-
-/*
- * Unlike SigSTM, we can NOT guarantee strong isolation
- * between transactional and non-transactional code.
- * tm_barrier() will saddle non-transactional code with
- * additional overheads. Because processor can NOT classify
- * where the memory access come from, TM or non-TM. So, all
- * memory access can NOT across barrier no matter who you are.
- */
-static inline void tm_barrier(void)
-{
-
-}
-
+#define DEF_THREAD_LOCAL(TYPE, NAME) \
+	__thread TYPE NAME
+#define GET_TX(tx) \
+	struct stm_tx *tx = get_tx()
 
 
 /*
@@ -202,20 +189,115 @@ typedef struct stm_tx {
  * the total records will consume 16M.
  */
 struct orec {
-	struct transaction *owner;
+	struct stm_tx *owner;
 	int version;
 	char old;
 	char new;
 	char pad[2];
 };
 
-void tm_wait(void);
-void tm_start(struct transaction *t);
-void tm_abort(void);
-int tm_commit(void);
-int tm_validate(void);
-char tm_read_addr(void *addr);
-void tm_write_addr(void *addr, char new);
-void tm_contention_manager(struct transaction *t);
+/*
+ * Unlike SigSTM, we can NOT guarantee strong isolation
+ * between transactional and non-transactional code.
+ * tm_barrier() will saddle non-transactional code with
+ * additional overheads. Because processor can NOT classify
+ * where the memory access come from, TM or non-TM. So, all
+ * memory access can NOT across barrier no matter who you are.
+ */
+static inline void stm_barrier(void)
+{
+	asm volatile ("mfence":::"memory");
+}
+
+static inline void
+OREC_SET_OWNER(struct orec *r, struct stm_tx *t)
+{
+	r->owner = t;
+}
+
+static inline stm_tx_t
+OREC_GET_OWNER(struct orec *r)
+{
+	return orec->owner;
+}
+
+static inline void
+OREC_SET_OLD(struct orec *r, char old)
+{
+	r->old = old;
+}
+
+static inline void
+OREC_SET_NEW(struct orec *r, char new)
+{
+	r->new = new;
+}
+
+static inline void
+stm_set_status(int status)
+{
+	GET_TX(tx);
+	atomic_write(&tx.status, status);
+}
+
+static inline int
+stm_get_status(void)
+{
+	GET_TX(tx);
+	return atomic_read(&tx.status);
+}
+
+static inline void
+stm_set_abort_reason(int reason)
+{
+	GET_TX(tx);
+	atomic_write(&tx.abort_reason, reason);
+}
+
+static inline int
+stm_get_abort_reason(void)
+{
+	GET_TX(tx);
+	return atomic_read(&tx.abort_reason);
+}
+
+static inline void
+stm_set_status_tx(struct stm_tx *tx, int status)
+{
+	atomic_write(&tx.status, status);
+}
+
+static inline int
+stm_get_status_tx(struct stm_tx *tx)
+{
+	return atomic_read(&tx.status);
+}
+
+static inline void
+stm_set_abort_reason_tx(struct stm_tx *tx, int reason)
+{
+	atomic_write(&tx.abort_reason, reason);
+}
+
+static inline int
+stm_get_abort_reason_tx(struct stm_tx *tx)
+{
+	return atomic_read(&tx.abort_reason);
+}
+
+static inline int
+tx_committed(void)
+{
+	return stm_get_status() == TM_COMMITED;
+}
+
+void stm_wait(void);
+void stm_start(void);
+void stm_abort(void);
+int stm_commit(void);
+int stm_validate(void);
+char stm_read_char(void *addr);
+void stm_write_char(void *addr, char new);
+void stm_contention_manager(struct transaction *t);
 
 #endif /* _SYZ_STM_H_ */

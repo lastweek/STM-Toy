@@ -14,34 +14,6 @@ DEF_THREAD_LOCAL(struct stm_tx *, thread_tx);
 struct orec	oa[4];
 int cnt=0;
 
-/*
- * No one owns the orec for now, and we want to assign a new
- * owner to the orec. In the meamtime, there are many threads
- * may try to set the owner, so here, we must use compare-and-set.
- *
- * Failure indicates that another thread has already set the
- * owner in the meantime with a little advance!
- */
-static void orec_set_owner(struct orec *r, struct transaction *t)
-{
-	r->owner = t;
-}
-
-static void orec_set_old(struct orec *r, char old)
-{
-	r->old = old;
-}
-
-static void orec_set_new(struct orec *r, char new)
-{
-	r->new = new;
-}
-
-static int is_committed(struct transaction *t)
-{
-	return tm_read_status(t) == TM_COMMITED;
-}
-
 
 /**
  * add_after_head - add @new after @ws->head
@@ -99,49 +71,14 @@ void stm_wait(void)
 // 
 //#################################################
 
-void tm_thread_init(void)
+void stm_init(void)
+{
+
+}
+
+void stm_thread_init(void)
 {
 	thread_tx = NULL;
-}
-
-static inline void
-stm_set_status(int status)
-{
-	GET_TX(tx);
-	atomic_write(&tx.status, status);
-}
-
-static inline int
-stm_get_status(void)
-{
-	GET_TX(tx);
-	return atomic_read(&tx.status);
-}
-
-static inline void
-stm_set_abort_reason(int reason)
-{
-	GET_TX(tx);
-	atomic_write(&tx.abort_reason, reason);
-}
-
-static inline int
-stm_get_abort_reason(void)
-{
-	GET_TX(tx);
-	return atomic_read(&tx.abort_reason);
-}
-
-static inline void
-stm_set_status_tx(struct stm_tx *tx, int status)
-{
-	atomic_write(&tx.status, status);
-}
-
-static inline int
-stm_get_status_tx(struct stm_tx *tx)
-{
-	return atomic_read(&tx.status);
 }
 
 /*
@@ -187,10 +124,19 @@ void stm_start(void)
 	set_tx(new_tx);
 }
 
+/*
+ * W
+ */
 void stm_abort(void)
 {
 	stm_set_status(STM_ABORT);
 	stm_set_abort_reason(STM_SELF_ABORT);
+}
+
+void stm_abort_tx(struct stm_tx *tx, int reason)
+{
+	stm_set_status_tx(tx, STM_ABORT);
+	stm_set_abort_reason_tx(tx, reason);
 }
 
 /**
@@ -240,6 +186,11 @@ int stm_validate(void)
 	return stm_get_status() == STM_ABORT;
 }
 
+int stm_validate_tx(struct stm_tx *tx)
+{
+	return stm_get_status_tx(tx) == STM_ABORT;
+}
+
 void stm_contention_manager(struct stm_tx *enemy)
 {
 	switch (DEFAULT_CM_POLICY) {
@@ -251,9 +202,8 @@ void stm_contention_manager(struct stm_tx *enemy)
 				 */
 				stm_abort();
 			}
-			/* Otherwise, abort enemy and set his abort reason. */
-			stm_set_status_tx(enemy, STM_ABORT);
-			stm_set_abort_reason_tx(enemy, STM_ENEMY_ABORT);
+			/* Otherwise, abort enemy. */
+			stm_abort_tx(enemy);
 			break;
 		case CM_POLITE:
 			/* Future */
@@ -272,9 +222,12 @@ char stm_read_char(void *addr)
 	char data;
 	struct orec *rec;
 	struct w_entry *we;
+	GET_TX(tx);
 	
-	if (stm_get_status() == STM_ABORT) {
+	if (stm_validate_tx(tx)) {
 		//TODO Restart transaction maybe?
+		//It is dangerous to return 0, cause application
+		//may use return value as a pointer.
 	}
 	
 	//FIXME
@@ -282,46 +235,57 @@ char stm_read_char(void *addr)
 	rec = &oa[cnt%4]; cnt++;
 	
 	/* COMPARE AND SWAP
-	 * If no transaction owns this orec, than set
+	 * If no transaction owns this orec, then set
 	 * the owner of the orec to this transaction.
+	 * If it fails to set rec->owner, that means
+	 * another transaction has already become the
+	 * owner of this orec. Or, this transaction
+	 * already owned this orec.
 	 */
-	GET_TX(tx);
-	if (atomic_cmpxchg(rec->owner, NULL, tx)) {
+	if (!atomic_cmpxchg(&rec->owner, NULL, tx)) {
 		
-	}
-	if ((rec->owner != NULL) && (rec->owner != &trans))
-		stm_contention_manager(rec->owner);
-	
-	if (rec->owner == &trans) {
-		/* Maybe write data set already has a entry,
-		   but that is ok, cause write entry dont have
-		   any new data, ownership record has! */
+		//FIXME What if another transaction abort this one now???
+
+		/* Update orec */
+		/* Note: Every threads can modify orec */
+		data = *(char *)addr;
+		orec_set_owner(rec, &trans);
+		orec_set_old(rec, data);
+		orec_set_new(rec, data);
+		
+		/* Update transaction write data set */
+		/* Note: Transaction belongs to a single thread */
+		we = (struct w_entry *)malloc(sizeof(struct w_entry));
+		we->addr = addr;
+		we->rec  = rec;
+		add_after_head(&(rec->owner->ws), we);
+		rec->owner->ws.nr_entries += 1;
+		
 		#ifdef TM_DEBUG
-			printf("R_Old %p %x\n", addr, rec->new);
+			printf("R_New %p %x\n", addr, data);
 		#endif
-		return rec->new;
+
+		return data;
+	}
+	
+	/*
+	 * When we reach here, means orec is not NULL,
+	 * means orec has an owner already. No other
+	 * threads can change the rec->owner now.
+	 * Under the circumstance, it is _safe_ to get
+	 * the owner and then compare it with tx.
+	 */
+	//FIXME What if another transaction abort this one now???
+	if (OREC_GET_OWNER(rec) == tx) {
+		#ifdef TM_DEBUG
+		printf("R_Old %p %x\n", addr, rec->new);
+		#endif
+		return OREC_GET_NEW(rec);
 	}
 
-	/* Update orec */
-	/* Note: Every threads can modify orec */
-	data = *(char *)addr;
-	orec_set_owner(rec, &trans);
-	orec_set_old(rec, data);
-	orec_set_new(rec, data);
-	
-	/* Update transaction write data set */
-	/* Note: Transaction belongs to a single thread */
-	we = (struct w_entry *)malloc(sizeof(struct w_entry));
-	we->addr = addr;
-	we->rec  = rec;
-	add_after_head(&(rec->owner->ws), we);
-	rec->owner->ws.nr_entries += 1;
-	
-	#ifdef TM_DEBUG
-		printf("R_New %p %x\n", addr, data);
-	#endif
-
-	return data;
+	if (OREC_GET_OWNER(rec) == NULL) {
+			
+	}
 }
 
 /**
