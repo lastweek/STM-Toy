@@ -27,7 +27,14 @@ static int tm_read_status(struct transaction *t)
 	return t->status;
 }
 
-/* FIXME Multithreads scalability! */
+/*
+ * No one owns the orec for now, and we want to assign a new
+ * owner to the orec. In the meamtime, there are many threads
+ * may try to set the owner, so here, we must use compare-and-set.
+ *
+ * Failure indicates that another thread has already set the
+ * owner in the meantime with a little advance!
+ */
 static void orec_set_owner(struct orec *r, struct transaction *t)
 {
 	r->owner = t;
@@ -138,6 +145,7 @@ int tm_commit(void)
 			we = we->next;
 			free(clean);
 		}
+		tm_barrier();
 		tm_set_status(&trans, TM_COMMITED);
 	}
 	

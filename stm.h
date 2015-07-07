@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define TM_DEBUG
+#define TM_STATISTICS
+
 /*
  *	STM API
  *
@@ -35,6 +38,7 @@
 #define TM_ABORT()		tm_abort()
 #define TM_COMMIT()		tm_commit()
 #define TM_VALIDATE()	tm_validate()
+#define TM_BARRIER()	tm_barrier()
 
 #define TM_READ_ADDR(a)		tm_read_addr(a)
 #define TM_WRITE_ADDR(a,v)	tm_write_addr(a,v)
@@ -65,6 +69,19 @@
 			__addr++; __valp++; __i++;					\
 		}												\
 	}
+
+/*
+ * Unlike SigSTM, we can NOT guarantee strong isolation
+ * between transactional and non-transactional code.
+ * tm_barrier() will saddle non-transactional code with
+ * additional overheads. Because processor can NOT classify
+ * where the memory access come from, TM or non-TM. So, all
+ * memory access can NOT across barrier no matter who you are.
+ */
+static inline void tm_barrier(void)
+{
+
+}
 
 
 
@@ -156,8 +173,11 @@ struct transaction {
 	volatile int status;
 	struct read_set  rs;
 	struct write_set ws;
-	int start_time;
-	int end_time;
+	int start_tsp;	/* Start TimeStamp */
+	int end_tsp;	/* End TimeStamp */
+#ifdef TM_STATISTICS
+	int nr_aborts;
+#endif
 };
 
 /*
