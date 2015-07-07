@@ -6,26 +6,15 @@
  * All transactions in a thread share a global descriptpor.
  * I choose to design like that for simplicity, which leads to
  * transactions can not nest.
- *
- * And for now i do not have a hashtable to hash addt to orec.
- * Only a global struct orec oa is used to test!
  */
 
-struct transaction trans;	// Assume this is the per-thread transaction
+__thread struct stm_tx *thread_tx;
+
+#define GET_TX(tx) \
+	struct stm_tx *tx = get_tx()
+
 struct orec	oa[4];
 int cnt=0;
-
-/* FIXME Multithreads scalability! */
-static void tm_set_status(struct transaction *t, int status)
-{
-	t->status = status;
-}
-
-/* FIXME Multithreads scalability! */
-static int tm_read_status(struct transaction *t)
-{
-	return t->status;
-}
 
 /*
  * No one owns the orec for now, and we want to assign a new
@@ -40,13 +29,11 @@ static void orec_set_owner(struct orec *r, struct transaction *t)
 	r->owner = t;
 }
 
-/* FIXME Multithreads scalability! */
 static void orec_set_old(struct orec *r, char old)
 {
 	r->old = old;
 }
 
-/* FIXME Multithreads scalability! */
 static void orec_set_new(struct orec *r, char new)
 {
 	r->new = new;
@@ -105,19 +92,78 @@ void tm_wait(void)
 {
 	int i;
 	for (i = 0; i < DELAY_LOOPS; i++) {
-		asm ("nop");
+		asm ("nop":::"memory");//Compiler Barrier
 	}
 }
 
-void tm_start(struct transaction *t)
+
+//#################################################
+// 
+//#################################################
+
+void tm_thread_init(void)
 {
-	memset(t, 0, sizeof(struct transaction));
-	tm_set_status(t, TM_ACTIVE);
+	thread_tx = NULL;
 }
 
-void tm_abort(void)
+static void stm_set_status(int status)
 {
-	tm_set_status(&trans, TM_ABORT);
+	GET_TX(tx);
+	atomic_write_int(&tx.status status);
+}
+
+static int stm_read_status(void)
+{
+	GET_TX(tx);
+	return atomic_read_int(&tx.status);
+}
+
+/*
+ *	Allocate _aligned_ tx descriptor
+ *	and zero it up.
+ */
+struct stm_tx *TX_MALLOC(size_t size)
+{
+	void *memptr;
+	
+	//TODO
+	memptr = valloc(size);
+	
+	memset(memptr, 0, size);
+	return (struct stm_tx *)memptr
+}
+
+//TODO
+int current_tsp(void)
+{
+	return 0;
+}
+
+/*
+ *	Allocate memory for thread-local tx descriptor
+ *	if it is the first time this thread use transaction.
+ *	Initialize the variables in tx descriptor.
+ */
+void stm_start(void)
+{
+	struct stm_tx *new_tx;
+	
+	/* Thread Global TX has initialized */
+	if (get_tx())
+		return;
+	
+	new_tx = TX_MALLOC(sizeof(struct stm_tx));
+	new_tx->status = TM_ACTIVE;
+	new_tx->version = 0;
+	new_tx->start_tsp = current_tsp();
+
+	set_tx(new_tx);
+}
+
+void stm_abort(int reason)
+{
+	stm_set_status(TM_ABORT);
+	stm_set_abort_reason(SELF_ABORT);
 }
 
 /**

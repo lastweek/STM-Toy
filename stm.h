@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 
 #define TM_DEBUG
 #define TM_STATISTICS
@@ -22,7 +23,7 @@
  */
 #define __TM_START__					\
 	{									\
-		tm_start(&trans);				\
+		stm_start(&trans);				\
 		setjmp(trans.jb);				\
 	}
 
@@ -35,13 +36,15 @@
 		/* add statistics maybe? */		\
 	}
 
-#define TM_ABORT()		tm_abort()
-#define TM_COMMIT()		tm_commit()
-#define TM_VALIDATE()	tm_validate()
-#define TM_BARRIER()	tm_barrier()
+#define TM_THREAD_INIT()	stm_thread_init()
+#define TM_INIT()			stm_init()
+#define TM_ABORT()			stm_abort()
+#define TM_COMMIT()			stm_commit()
+#define TM_VALIDATE()		stm_validate()
+#define TM_BARRIER()		stm_barrier()
 
-#define TM_READ_ADDR(a)		tm_read_addr(a)
-#define TM_WRITE_ADDR(a,v)	tm_write_addr(a,v)
+#define TM_READ_ADDR(a)		stm_read_addr(a)
+#define TM_WRITE_ADDR(a,v)	stm_write_addr(a,v)
 
 #define TM_READ(TMOBJECT)								\
 	({													\
@@ -168,17 +171,19 @@ struct write_set {
  * Each transaction have a descriptor depicts
  * its status, data sets and so on.
  */
-struct transaction {
+typedef struct stm_tx {
 	jmp_buf jb;
 	volatile int status;
+	int version;
 	struct read_set  rs;
 	struct write_set ws;
 	int start_tsp;	/* Start TimeStamp */
 	int end_tsp;	/* End TimeStamp */
+	int abort_reason;
 #ifdef TM_STATISTICS
 	int nr_aborts;
 #endif
-};
+}stm_tx_t;
 
 /*
  * Ownership Record
