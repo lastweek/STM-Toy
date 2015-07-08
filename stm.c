@@ -42,12 +42,12 @@ static void add_after_head(struct write_set *ws, struct w_entry *new)
 }
 
 /*
- * stm_addr_to_orec
+ * stm_addr_to_orec - hash addr to get orec
  * @addr: the addr used to hash
- * return: hashed orec in hashtable
+ * Return: orec pointer
  *
- * STM system should keep a hashtable to maintain all
- * ownership records used by an active transaction.
+ * STM system keep a _global_ hashtable to maintain all
+ * the ownership records used by all alive transactions.
  * After a transaction commit, hashtable should free
  * all transaction relevent records.
  */
@@ -59,12 +59,12 @@ stm_addr_to_orec(void *addr)
 }
 
 /*
- * TX_MALLOC - malloc memory for object
+ * STM_MALLOC - malloc memory for object
  * @size: object size need to malloc
  * A wrapper for memory allocater.
  */
 //TODO
-struct stm_tx *TX_MALLOC(size_t size)
+struct stm_tx *STM_MALLOC(size_t size)
 {
 	void *memptr;
 	
@@ -109,7 +109,7 @@ void stm_start(void)
 	if (tls_get_tx())
 		return;
 	
-	new_tx = TX_MALLOC(sizeof(struct stm_tx));
+	new_tx = STM_MALLOC(sizeof(struct stm_tx));
 	new_tx->status = STM_ACTIVE;
 	new_tx->version = 0;
 	new_tx->start_tsp = stm_current_tsp();
