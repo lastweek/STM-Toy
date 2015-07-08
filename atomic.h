@@ -36,6 +36,14 @@ static inline void atomic_write(atomic_t *p, int val)
 	*p = val;
 }
 
+static inline void atomic_inc(atomic_t *p)
+{
+	asm volatile (
+		"lock ; incl %0"
+		: "+m"(*p)
+	);
+}
+
 static inline void atomic_or(atomic_t *p, int mask)
 {
 	asm volatile (

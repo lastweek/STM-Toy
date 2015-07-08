@@ -123,7 +123,7 @@ void stm_restart(void)
 	struct w_entry *entry, *clean;
 	GET_TX(tx);
 
-	PRINT_DEBUG("RESTART tid:%d reason: %d\n",
+	PRINT_DEBUG("RESTART_1 TID :%d REASON: %d\n",
 		tx->tid, tx->abort_reason);
 	
 	/* clean up */
@@ -131,8 +131,12 @@ void stm_restart(void)
 	while (entry != NULL) {
 		clean = entry;
 		entry = entry->next;
-		//free(clean);
+		free(clean);
 	}
+
+	PRINT_DEBUG("RESTART_2 TID:%d REASON: %d\n",
+		tx->tid, tx->abort_reason);
+
 #ifdef STM_STATISTICS
 	tx->nr_aborts++;
 #endif
@@ -177,6 +181,8 @@ int stm_commit(void)
 	GET_TX(tx);
 	
 	if (atomic_cmpxchg(&tx->status, STM_ACTIVE, STM_COMMITING) == STM_ACTIVE) {
+		PRINT_DEBUG("TX: %d TID: %d COMMITING\n",
+			tx->version, tx->tid);
 		entry = tx->ws.head;
 		while (entry != NULL) {
 			rec = entry->rec;
@@ -194,11 +200,14 @@ int stm_commit(void)
 			
 			clean = entry;
 			entry = entry->next;
-			//free(clean);
+			free(clean);
 		}
+		//FIXME
+		memset(&tx->ws, 0, sizeof(struct write_set));
+
 		stm_barrier();
 		stm_set_status_tx(tx, STM_COMMITED);
-		PRINT_DEBUG("TX: %d TID: %d COMMITED\n",
+		PRINT_DEBUG("TX: %d TID: %d COMMITTED\n",
 			tx->version, tx->tid);
 		return 0;
 	} else {
@@ -226,30 +235,20 @@ int stm_validate_tx(struct stm_tx *tx)
 	return stm_get_status_tx(tx) == STM_ABORT;
 }
 
+//FIXME Always abort self now.
 int stm_contention_manager(struct stm_tx *enemy)
 {
 	GET_TX(tx);
 	switch (DEFAULT_CM_POLICY) {
-		case CM_AGGRESSIVE:
-			/* As the promise we have made, this conflicting
-			 * transaction can NOT abort a COMMITING enemy.
-			 * TODO Maybe abort himself or wait a moment?
-			 */
-			/*
-			if (stm_get_status_tx(enemy) == STM_COMMITING) {
-				stm_abort_tx(tx, STM_SELF_ABORT);
-				return STM_SELF_ABORT;
-			}
-			else {
-				stm_abort_tx(enemy, STM_ENEMY_ABORT);
-				return STM_ENEMY_ABORT;
-			} */
-			stm_abort_tx(tx, STM_SELF_ABORT);
-			return STM_SELF_ABORT;
-		case CM_POLITE:
-			/* Future */
-			stm_wait();
-			return STM_SELF_ABORT;
+	
+	case CM_AGGRESSIVE:
+		stm_abort_tx(tx, STM_SELF_ABORT);
+		return STM_SELF_ABORT;
+
+	case CM_POLITE:
+		/* Future */
+		stm_wait();
+		return STM_SELF_ABORT;
 	};
 }
 
@@ -346,6 +345,7 @@ void stm_write_char(void *addr, char new)
 	rec = &oa[cnt%4]; cnt++;
 	rec = &oa[0];
 	
+	/* CAS */
 	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
 		if (enemy == tx) {
 			OREC_SET_NEW(rec, new);
@@ -353,16 +353,16 @@ void stm_write_char(void *addr, char new)
 				tx->version, tx->tid, new, addr);
 			return;
 		}
+		
+		/* CM Decide */
 		if (stm_contention_manager(enemy) == STM_SELF_ABORT) {
 			PRINT_DEBUG("TX: %d TID: %d ABORT SELF\n",
 				tx->version, tx->tid);
 			return;
 		}
-		else
-			PRINT_DEBUG("TX: %d TID: %d ABORT ENEMY\n",
-				tx->version, tx->tid);
 	}
 	
+	/* First access */
 	if (enemy == NULL) {
 		old = *(char *)addr;
 		OREC_SET_OLD(rec, old);
@@ -377,22 +377,16 @@ void stm_write_char(void *addr, char new)
 		add_after_head(&tx->ws, entry);
 		tx->ws.nr_entries += 1;
 		return;
-	} else {
-		//some tx owned OREC, but aborted now.
-		//Reclaim the owner of OREC
+	}
+	else {
 		//TODO For simplicity, do nothing.
-		stm_abort();
-		PRINT_DEBUG("11abort\n");
+		//Cause we are being POLITE now, always ABORT self,
+		//so for now, we can not reach here.
+		PRINT_DEBUG("TX: %d TID: %d ABORT ENEMY\n",
+			tx->version, tx->tid);
 		return;
 	}
 }
-
-struct str {
-	char a;
-	char b;
-	char c;
-	char d;
-};
 
 void printID(void)
 {
@@ -400,6 +394,8 @@ void printID(void)
 	pthread_t tid = pthread_self();
 	printf("Process: %d Thread: %d\n", pid, tid);
 }
+
+int counter = 0;
 
 char shc = 'A';
 int shint = 0x05060708;
@@ -422,11 +418,16 @@ void *thread_func(void *arg)
 		TM_COMMIT();
 
 	} __TM_END__
+	
+	atomic_inc(&counter);
 
 	__TM_START__ {
 		TM_WRITE_CHAR(shc, 'B');
+		TM_WRITE_CHAR(shc, 'D');
 		TM_COMMIT();
 	} __TM_END__
+	
+	atomic_inc(&counter);
 
 	return (void *)0;
 }
@@ -438,12 +439,12 @@ int main(void)
 
 	printID();
 	
-	for (i = 0; i < 5; i++) {
+	for (i = 0; i < 10; i++) {
 		err = pthread_create(&ntid, NULL, thread_func, NULL);
 		if (err)
 			printf("Create thread %d failed\n", ntid);
 	}
-	
 	sleep(5);
+	printf("Counter: %d\n", counter);
 	return 0;
 }
