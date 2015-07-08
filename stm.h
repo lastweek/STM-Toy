@@ -192,6 +192,12 @@ struct orec {
 	char pad[2];
 };
 
+#define DEFINE_THREAD_LOCAL(TYPE, NAME)	__thread TYPE NAME
+#define DECLARE_THREAD_LOCAL(TYPE, NAME) extern __thread TYPE NAME
+#define GET_TX(tx)	struct stm_tx *tx = tls_get_tx()
+
+DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
+
 void stm_start(void);
 void stm_abort(void);
 int stm_commit(void);
@@ -202,9 +208,6 @@ int stm_contention_manager(struct stm_tx *enemy);
 
 struct stm_tx *tls_get_tx(void);
 void tls_set_tx(struct stm_tx *nex_tx);
-
-#define DEF_THREAD_LOCAL(TYPE, NAME)	__thread TYPE NAME
-#define GET_TX(tx)	struct stm_tx *tx = tls_get_tx()
 
 /*
  * Unlike SigSTM, we can NOT guarantee strong isolation

@@ -1,6 +1,8 @@
 CPPFLAGS := -DTM_DEBUG
+SRCS = stm.c tls.c
+
 all:
-	gcc $(CPPFLAGS) -O2 stm.c
+	gcc -c $(SRCS)
 
 clean:
 	rm -f *.o a.out

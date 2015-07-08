@@ -6,7 +6,7 @@
  * All transactions in a thread _share_ a global descriptpor,
  * they use the global descriptor in sequence.
  */
-DEF_THREAD_LOCAL(struct stm_tx *, thread_tx);
+DEFINE_THREAD_LOCAL(struct stm_tx *, thread_tx);
 
 struct orec	oa[4];
 int cnt=0;
