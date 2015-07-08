@@ -23,14 +23,16 @@
  */
 #define __TM_START__					\
 	{									\
-		stm_start(&trans);				\
-		setjmp(trans.jb);				\
+		stm_tx_t *tx = tls_get_tx();	\
+		stm_start();					\
+		setjmp(tx->jb);					\
 	}
 
 #define __TM_END__						\
 	{									\
-		if (!is_committed(&trans)) {	\
-			longjmp(trans.jb, 1);		\
+		stm_tx_t *tx = tls_get_tx();	\
+		if (!tx_committed()) {			\
+			longjmp(tx->jb, 1);			\
 		}								\
 		/* set end time maybe? */		\
 		/* add statistics maybe? */		\
@@ -72,12 +74,6 @@
 			__addr++; __valp++; __i++;					\
 		}												\
 	}
-
-#define DEF_THREAD_LOCAL(TYPE, NAME) \
-	__thread TYPE NAME
-#define GET_TX(tx) \
-	struct stm_tx *tx = get_tx()
-
 
 /*
  * Contention Policy
@@ -196,6 +192,21 @@ struct orec {
 	char pad[2];
 };
 
+void stm_wait(void);
+void stm_start(void);
+void stm_abort(void);
+int stm_commit(void);
+int stm_validate(void);
+char stm_read_char(void *addr);
+void stm_write_char(void *addr, char new);
+int stm_contention_manager(struct stm_tx *enemy);
+
+struct stm_tx *tls_get_tx(void);
+void tls_set_tx(struct stm_tx *nex_tx);
+
+#define DEF_THREAD_LOCAL(TYPE, NAME)	__thread TYPE NAME
+#define GET_TX(tx)	struct stm_tx *tx = tls_get_tx()
+
 /*
  * Unlike SigSTM, we can NOT guarantee strong isolation
  * between transactional and non-transactional code.
@@ -215,10 +226,10 @@ OREC_SET_OWNER(struct orec *r, struct stm_tx *t)
 	r->owner = t;
 }
 
-static inline stm_tx_t
+static inline stm_tx_t *
 OREC_GET_OWNER(struct orec *r)
 {
-	return orec->owner;
+	return r->owner;
 }
 
 static inline void
@@ -237,67 +248,58 @@ static inline void
 stm_set_status(int status)
 {
 	GET_TX(tx);
-	atomic_write(&tx.status, status);
+	atomic_write(&tx->status, status);
 }
 
 static inline int
 stm_get_status(void)
 {
 	GET_TX(tx);
-	return atomic_read(&tx.status);
+	return atomic_read(&tx->status);
 }
 
 static inline void
 stm_set_abort_reason(int reason)
 {
 	GET_TX(tx);
-	atomic_write(&tx.abort_reason, reason);
+	atomic_write(&tx->abort_reason, reason);
 }
 
 static inline int
 stm_get_abort_reason(void)
 {
 	GET_TX(tx);
-	return atomic_read(&tx.abort_reason);
+	return atomic_read(&tx->abort_reason);
 }
 
 static inline void
 stm_set_status_tx(struct stm_tx *tx, int status)
 {
-	atomic_write(&tx.status, status);
+	atomic_write(&tx->status, status);
 }
 
 static inline int
 stm_get_status_tx(struct stm_tx *tx)
 {
-	return atomic_read(&tx.status);
+	return atomic_read(&tx->status);
 }
 
 static inline void
 stm_set_abort_reason_tx(struct stm_tx *tx, int reason)
 {
-	atomic_write(&tx.abort_reason, reason);
+	atomic_write(&tx->abort_reason, reason);
 }
 
 static inline int
 stm_get_abort_reason_tx(struct stm_tx *tx)
 {
-	return atomic_read(&tx.abort_reason);
+	return atomic_read(&tx->abort_reason);
 }
 
 static inline int
 tx_committed(void)
 {
-	return stm_get_status() == TM_COMMITED;
+	return stm_get_status() == STM_COMMITED;
 }
-
-void stm_wait(void);
-void stm_start(void);
-void stm_abort(void);
-int stm_commit(void);
-int stm_validate(void);
-char stm_read_char(void *addr);
-void stm_write_char(void *addr, char new);
-void stm_contention_manager(struct transaction *t);
 
 #endif /* _SYZ_STM_H_ */

@@ -93,7 +93,7 @@ struct stm_tx *TX_MALLOC(size_t size)
 	memptr = valloc(size);
 	
 	memset(memptr, 0, size);
-	return (struct stm_tx *)memptr
+	return (struct stm_tx *)memptr;
 }
 
 //TODO
@@ -112,20 +112,21 @@ void stm_start(void)
 	struct stm_tx *new_tx;
 	
 	/* Thread Global TX has initialized */
-	if (get_tx()) {
-		
+	if (tls_get_tx())
 		return;
-	}
 	
 	new_tx = TX_MALLOC(sizeof(struct stm_tx));
-	new_tx->status = TM_ACTIVE;
+	new_tx->status = STM_ACTIVE;
 	new_tx->version = 0;
 	new_tx->start_tsp = current_tsp();
-	set_tx(new_tx);
+	tls_set_tx(new_tx);
 }
 
 /*
- * W
+ * Maybe there are more than one transaction
+ * try to abort the same tx in the meantime.
+ * That is ok, because abort() only change
+ * the status of the tx.
  */
 void stm_abort(void)
 {
@@ -136,7 +137,7 @@ void stm_abort(void)
 void stm_abort_tx(struct stm_tx *tx, int reason)
 {
 	stm_set_status_tx(tx, STM_ABORT);
-	stm_set_abort_reason_tx(tx, reason);
+	stm_set_abort_reason_tx(tx, STM_ENEMY_ABORT);
 }
 
 /**
@@ -156,11 +157,11 @@ int stm_commit(void)
 	 * other words, it is un-interruptable.
 	 */
 	GET_TX(tx);
-	if (atomic_cmpxchg(&tx.status, STM_ACTIVE, STM_COMMITING) == STM_ACTIVE) {
+	if (atomic_cmpxchg(&tx->status, STM_ACTIVE, STM_COMMITING) == STM_ACTIVE) {
 		/* Now it is time to write back the dirty data
 		 * that have been modified by this transaction.
 		 * We are in COMMITING state, no one can abort us. */
-		for (we = trans.ws.head; we != NULL; ) {
+		for (we = tx->ws.head; we != NULL; ) {
 			rec = we->rec;
 			*(char *)we->addr = rec->new;
 			clean = we;
@@ -169,7 +170,7 @@ int stm_commit(void)
 		}
 		/* Wait until data flush out */
 		stm_barrier();
-		stm_set_status_tx(tx, TM_COMMITED);
+		stm_set_status_tx(tx, STM_COMMITED);
 		return 0;
 	}
 	return 1;
@@ -191,24 +192,29 @@ int stm_validate_tx(struct stm_tx *tx)
 	return stm_get_status_tx(tx) == STM_ABORT;
 }
 
-void stm_contention_manager(struct stm_tx *enemy)
+int stm_contention_manager(struct stm_tx *enemy)
 {
+	GET_TX(tx);
 	switch (DEFAULT_CM_POLICY) {
 		case CM_AGGRESSIVE:
-			if (stm_get_status_tx(enemy) == TM_COMMITING) {
-				/* As the promise we have made, this conflicting
-				 * transaction can NOT abort a COMMITING enemy.
-				 * Maybe abort himself or wait a moment ??TODO
-				 */
-				stm_abort();
+			/* As the promise we have made, this conflicting
+			 * transaction can NOT abort a COMMITING enemy.
+			 * TODO Maybe abort himself or wait a moment?
+			 */
+			if (stm_get_status_tx(enemy) == STM_COMMITING) {
+				stm_abort_tx(tx, STM_SELF_ABORT);
+				return STM_SELF_ABORT;
 			}
-			/* Otherwise, abort enemy. */
-			stm_abort_tx(enemy);
-			break;
+			else {
+				stm_abort_tx(enemy, STM_ENEMY_ABORT);
+				return STM_ENEMY_ABORT;
+			}
 		case CM_POLITE:
 			/* Future */
 			stm_wait();
-			break;
+			return STM_SELF_ABORT;
+		default:
+			return STM_SELF_ABORT;
 	};
 }
 
@@ -222,69 +228,60 @@ char stm_read_char(void *addr)
 	char data;
 	struct orec *rec;
 	struct w_entry *we;
+	struct stm_tx *enemy;
 	GET_TX(tx);
 	
 	if (stm_validate_tx(tx)) {
 		//TODO Restart transaction maybe?
 		//It is dangerous to return 0, cause application
 		//may use return value as a pointer.
+		return 0;
 	}
 	
-	//FIXME
+	//FIXME Get the ownership record
 	rec = hash_addr_to_orec(addr);
 	rec = &oa[cnt%4]; cnt++;
 	
-	/* COMPARE AND SWAP
-	 * If no transaction owns this orec, then set
-	 * the owner of the orec to this transaction.
-	 * If it fails to set rec->owner, that means
-	 * another transaction has already become the
-	 * owner of this orec. Or, this transaction
-	 * already owned this orec.
-	 */
-	if (!atomic_cmpxchg(&rec->owner, NULL, tx)) {
-		
-		//FIXME What if another transaction abort this one now???
+	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
+		/* Other tx may abort thix tx IN THE MEANTIME.
+		 * However, we just return the new data in OREC.
+		 * If this tx is aborted by other tx, then
+		 * in next read/write or commit time, this
+		 * tx will restart, so consistency ensured */
+		if (enemy == tx)
+			return OREC_GET_NEW(rec);
 
-		/* Update orec */
-		/* Note: Every threads can modify orec */
+		/* Otherwise, an enemy has already owns this OREC.
+		 * Now let contention manager to decide the coin. */
+		if (stm_contention_manager(enemy) == STM_SELF_ABORT) {
+			//TODO
+			return 0;
+		}
+	}
+	
+	/*
+	 * When we reach here, it means OREC has NO owner,
+	 * or, OREC has a owner who contention manager has
+	 * already decided to abort.
+	 * BUT, other tx may abort this tx right now...
+	 */
+	if (enemy == NULL) {
 		data = *(char *)addr;
-		orec_set_owner(rec, &trans);
-		orec_set_old(rec, data);
-		orec_set_new(rec, data);
+		OREC_SET_OLD(rec, data);
+		OREC_SET_NEW(rec, data);
 		
 		/* Update transaction write data set */
-		/* Note: Transaction belongs to a single thread */
 		we = (struct w_entry *)malloc(sizeof(struct w_entry));
 		we->addr = addr;
 		we->rec  = rec;
 		add_after_head(&(rec->owner->ws), we);
 		rec->owner->ws.nr_entries += 1;
-		
-		#ifdef TM_DEBUG
-			printf("R_New %p %x\n", addr, data);
-		#endif
-
 		return data;
-	}
-	
-	/*
-	 * When we reach here, means orec is not NULL,
-	 * means orec has an owner already. No other
-	 * threads can change the rec->owner now.
-	 * Under the circumstance, it is _safe_ to get
-	 * the owner and then compare it with tx.
-	 */
-	//FIXME What if another transaction abort this one now???
-	if (OREC_GET_OWNER(rec) == tx) {
-		#ifdef TM_DEBUG
-		printf("R_Old %p %x\n", addr, rec->new);
-		#endif
-		return OREC_GET_NEW(rec);
-	}
-
-	if (OREC_GET_OWNER(rec) == NULL) {
-			
+	} else {
+		//some tx owned OREC, but aborted now.
+		//Reclaim the owner of OREC
+		//TODO For simplicity, do nothing.
+		return 0;
 	}
 }
 
@@ -297,41 +294,47 @@ void stm_write_char(void *addr, char new)
 	char old;
 	struct orec *rec;
 	struct w_entry *we;
-
-	/* Hash addr to get its ownership record */
+	struct stm_tx *enemy;
+	GET_TX(tx);
+	
+	if (stm_validate_tx(tx)) {
+		//TODO Restart transaction maybe?
+		//It is dangerous to return 0, cause application
+		//may use return value as a pointer.
+		return;
+	}
+	
+	//FIXME Get the ownership record
 	rec = hash_addr_to_orec(addr);
-
-	/* FIXME: use oa for test*/
 	rec = &oa[cnt%4]; cnt++;
 	
-	if ((rec->owner != NULL) && (rec->owner != &trans))
-		tm_contention_manager(rec->owner);
-	
-	if (rec->owner == &trans) {
-		#ifdef TM_DEBUG
-			printf("W_Old %p %x\n", addr, new);
-		#endif
-		orec_set_new(rec, new);
+	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
+		if (enemy == tx)
+			return;
+
+		if (stm_contention_manager(enemy) == STM_SELF_ABORT) {
+			//TODO
+			return;
+		}
 	}
-	else {
-		/* Update orec */
-		/* Note: Every threads can modify orec */
+	
+	if (enemy == NULL) {
 		old = *(char *)addr;
-		orec_set_owner(rec, &trans);
-		orec_set_old(rec, old);
-		orec_set_new(rec, new);
+		OREC_SET_OLD(rec, old);
+		OREC_SET_NEW(rec, new);
 		
 		/* Update transaction write data set */
-		/* Note: Transaction belongs to a single thread */
 		we = (struct w_entry *)malloc(sizeof(struct w_entry));
 		we->addr = addr;
 		we->rec  = rec;
 		add_after_head(&(rec->owner->ws), we);
 		rec->owner->ws.nr_entries += 1;
-		
-		#ifdef TM_DEBUG
-			printf("W_New %p %x\n", addr, new);
-		#endif
+		return;
+	} else {
+		//some tx owned OREC, but aborted now.
+		//Reclaim the owner of OREC
+		//TODO For simplicity, do nothing.
+		return;
 	}
 }
 
