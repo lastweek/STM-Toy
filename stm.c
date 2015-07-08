@@ -1,12 +1,11 @@
-#include "atomic.h"
 #include "stm.h"
 
 /* 
  * Each thread only has one transaction descriptor instance.
  * All transactions in a thread _share_ a global descriptpor,
  */
-//DEFINE_THREAD_LOCAL(struct stm_tx *, thread_tx);
-struct stm_tx *thread_tx;
+
+DEFINE_THREAD_LOCAL(struct stm_tx *, thread_tx);
 
 struct orec	oa[4];
 int cnt=0;
@@ -99,17 +98,24 @@ void stm_thread_init(void)
 void stm_start(void)
 {
 	struct stm_tx *new_tx;
-
+	
 	if (tls_get_tx()) {
 		thread_tx->version++;		
+		PRINT_DEBUG("TX %d START\n", new_tx->version);
 		return;
 	}
 	
 	new_tx = STM_MALLOC(sizeof(struct stm_tx));
+	new_tx->tid = pthread_self();
 	new_tx->start_tsp = stm_current_tsp();
-	new_tx->status = STM_ACTIVE;
-
+	stm_set_status_tx(new_tx, STM_ACTIVE);
 	tls_set_tx(new_tx);
+	PRINT_DEBUG("TX %d START\n", new_tx->version);
+}
+
+void stm_restart(void)
+{
+	GET_TX(tx);
 }
 
 /*
@@ -243,6 +249,7 @@ char stm_read_char(void *addr)
 	//FIXME Get the ownership record
 	rec = stm_addr_to_orec(addr);
 	rec = &oa[cnt%4]; cnt++;
+	rec = &oa[0];
 	
 	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
 		/* Other tx may abort thix tx IN THE MEANTIME.
@@ -250,8 +257,10 @@ char stm_read_char(void *addr)
 		 * If this tx is aborted by other tx, then
 		 * in next read/write or commit time, this
 		 * tx will restart, so consistency ensured */
-		if (enemy == tx)
+		if (enemy == tx) {
+			PRINT_DEBUG("Read-Exist at %16p\n", addr);
 			return OREC_GET_NEW(rec);
+		}
 
 		/* Otherwise, an enemy has already owns this OREC.
 		 * Now let contention manager to decide the coin. */
@@ -270,6 +279,7 @@ char stm_read_char(void *addr)
 		data = *(char *)addr;
 		OREC_SET_OLD(rec, data);
 		OREC_SET_NEW(rec, data);
+		PRINT_DEBUG("Read-New at %16p\n", addr);
 		
 		/* Update transaction write data set */
 		entry = (struct w_entry *)malloc(sizeof(struct w_entry));
@@ -306,11 +316,12 @@ void stm_write_char(void *addr, char new)
 	//FIXME Get the ownership record
 	rec = stm_addr_to_orec(addr);
 	rec = &oa[cnt%4]; cnt++;
+	rec = &oa[0];
 	
 	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
 		if (enemy == tx) {
 			OREC_SET_NEW(rec, new);
-			PRINT_DEBUG("Write %3d to 0x%16p", new, addr);
+			PRINT_DEBUG("Write-Exist %3d to %16p\n", new, addr);
 			return;
 		}
 		if (stm_contention_manager(enemy) == STM_SELF_ABORT) {
@@ -318,12 +329,15 @@ void stm_write_char(void *addr, char new)
 			PRINT_DEBUG("TX %d SELF_ABORT\n", tx->version);
 			return;
 		}
+		else
+			PRINT_DEBUG("TX %d ENEMY_ABORT\n", tx->version);
 	}
 	
 	if (enemy == NULL) {
 		old = *(char *)addr;
 		OREC_SET_OLD(rec, old);
 		OREC_SET_NEW(rec, new);
+		PRINT_DEBUG("Write-New %3d to %16p\n", new, addr);
 		
 		/* Update transaction write data set */
 		entry = (struct w_entry *)malloc(sizeof(struct w_entry));
@@ -336,6 +350,7 @@ void stm_write_char(void *addr, char new)
 		//some tx owned OREC, but aborted now.
 		//Reclaim the owner of OREC
 		//TODO For simplicity, do nothing.
+		stm_abort();
 		return;
 	}
 }
@@ -347,27 +362,48 @@ struct str {
 	char d;
 };
 
-int main(void)
+void printID(void)
 {
-	char share = 'A';
-	char c;
-	int shint = 0x05060708;
-	int s, t;
-	struct str x, y;
-	struct str z = {.a='A', .b='B', .c='C', .d='D'};
+	pid_t pid = getpid();
+	pthread_t tid = pthread_self();
+	printf("Process: %d Thread: %d\n", pid, tid);
+}
+
+char shc = 'A';
+int shint = 0x05060708;
+
+void *thread_func(void *arg)
+{
+	printID();
 	
 	TM_THREAD_INIT();
 
 	__TM_START__ {
 		
 		//TM_WRITE(shint, 0x01020304);
-		TM_WRITE_CHAR(&share, 'B');
-		printf("%c\n", share);
+		//TM_READ(shint);
+		TM_WRITE_CHAR(shc, 'B');
+		TM_WRITE_CHAR(shc, 'C');
+		TM_WRITE_CHAR(shc, 'D');
 		
 		TM_COMMIT();
 
 	} __TM_END__
 
-	printf("%c\n", share);
+	return (void *)0;
+}
+
+int main(void)
+{
+	int i, err;
+	pthread_t ntid;
+
+	printID();
+	for (i = 0; i < 2; i++) {
+		err = pthread_create(&ntid, NULL, thread_func, NULL);
+		if (err)
+			printf("Create thread %d failed\n", ntid);
+	}
+
 	return 0;
 }

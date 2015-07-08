@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
+#include "atomic.h"
 
 #define STM_DEBUG
 #define STM_STATISTICS
@@ -37,6 +38,7 @@
 	{									\
 		stm_tx_t *tx = tls_get_tx();	\
 		if (!tx_committed()) {			\
+			printf("TX REstart\n");		\
 			longjmp(tx->jb, 1);			\
 		}								\
 	}
@@ -48,8 +50,8 @@
 #define TM_VALIDATE()		stm_validate()
 #define TM_BARRIER()		stm_barrier()
 
-#define TM_READ_CHAR(a)		stm_read_char(a)
-#define TM_WRITE_CHAR(a,v)	stm_write_char(a,v)
+#define TM_READ_CHAR(a)		stm_read_char(&(a))
+#define TM_WRITE_CHAR(a,v)	stm_write_char(&(a),v)
 
 #define TM_READ(TMOBJECT)								\
 	({													\
@@ -167,8 +169,9 @@ struct write_set {
  * its status, data sets and so on.
  */
 typedef struct stm_tx {
+	atomic_t	status;
+	pthread_t	tid;
 	jmp_buf jb;
-	int status;
 	int version;
 	struct read_set  rs;
 	struct write_set ws;
@@ -199,8 +202,7 @@ struct orec {
 #define DECLARE_THREAD_LOCAL(TYPE, NAME) extern __thread TYPE NAME
 #define GET_TX(tx)	struct stm_tx *tx = tls_get_tx()
 
-//DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
-extern struct stm_tx *thread_tx;
+DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
 
 void stm_start(void);
 void stm_abort(void);
