@@ -38,7 +38,7 @@
 	{									\
 		stm_tx_t *tx = tls_get_tx();	\
 		if (!tx_committed()) {			\
-			printf("TX REstart\n");		\
+			stm_restart();				\
 			longjmp(tx->jb, 1);			\
 		}								\
 	}
@@ -117,8 +117,8 @@ enum STM_STATUS {
 };
 
 enum STM_ABORT_REASON {
-	STM_SELF_ABORT,
-	STM_ENEMY_ABORT
+	STM_SELF_ABORT	= 1,
+	STM_ENEMY_ABORT	= 2
 };
 
 /*
@@ -178,7 +178,7 @@ typedef struct stm_tx {
 	int start_tsp;	/* Start TimeStamp */
 	int end_tsp;	/* End TimeStamp */
 	int abort_reason;
-#ifdef TM_STATISTICS
+#ifdef STM_STATISTICS
 	int nr_aborts;
 #endif
 }stm_tx_t;
@@ -204,6 +204,7 @@ struct orec {
 
 DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
 
+void stm_restart(void);
 void stm_start(void);
 void stm_abort(void);
 int stm_commit(void);

@@ -101,7 +101,10 @@ void stm_start(void)
 	
 	if (tls_get_tx()) {
 		thread_tx->version++;		
-		PRINT_DEBUG("TX %d START\n", new_tx->version);
+		stm_set_status_tx(thread_tx, STM_ACTIVE);
+		
+		PRINT_DEBUG("START tx: %2d tid: %d\n",
+			thread_tx->version, thread_tx->tid);
 		return;
 	}
 	
@@ -110,12 +113,30 @@ void stm_start(void)
 	new_tx->start_tsp = stm_current_tsp();
 	stm_set_status_tx(new_tx, STM_ACTIVE);
 	tls_set_tx(new_tx);
-	PRINT_DEBUG("TX %d START\n", new_tx->version);
+	
+	PRINT_DEBUG("START tx: %2d tid: %d\n",
+		thread_tx->version, thread_tx->tid);
 }
 
 void stm_restart(void)
 {
+	struct w_entry *entry, *clean;
 	GET_TX(tx);
+
+	PRINT_DEBUG("RESTART tid:%d reason: %d\n",
+		tx->tid, tx->abort_reason);
+	
+	/* clean up */
+	entry = tx->ws.head;
+	while (entry != NULL) {
+		clean = entry;
+		entry = entry->next;
+		//free(clean);
+	}
+#ifdef STM_STATISTICS
+	tx->nr_aborts++;
+#endif
+	stm_set_status_tx(tx, STM_ACTIVE);
 }
 
 /*
@@ -173,15 +194,18 @@ int stm_commit(void)
 			
 			clean = entry;
 			entry = entry->next;
-			free(clean);
+			//free(clean);
 		}
 		stm_barrier();
 		stm_set_status_tx(tx, STM_COMMITED);
-		PRINT_DEBUG("TX %d COMMITED\n", tx->version);
+		PRINT_DEBUG("TX: %d TID: %d COMMITED\n",
+			tx->version, tx->tid);
 		return 0;
-	}
-	else
+	} else {
+		PRINT_DEBUG("TX: %d TID: %d COMMIT FAIL\n",
+			tx->version, tx->tid);
 		return 1;
+	}
 }
 
 /*
@@ -211,6 +235,7 @@ int stm_contention_manager(struct stm_tx *enemy)
 			 * transaction can NOT abort a COMMITING enemy.
 			 * TODO Maybe abort himself or wait a moment?
 			 */
+			/*
 			if (stm_get_status_tx(enemy) == STM_COMMITING) {
 				stm_abort_tx(tx, STM_SELF_ABORT);
 				return STM_SELF_ABORT;
@@ -218,7 +243,9 @@ int stm_contention_manager(struct stm_tx *enemy)
 			else {
 				stm_abort_tx(enemy, STM_ENEMY_ABORT);
 				return STM_ENEMY_ABORT;
-			}
+			} */
+			stm_abort_tx(tx, STM_SELF_ABORT);
+			return STM_SELF_ABORT;
 		case CM_POLITE:
 			/* Future */
 			stm_wait();
@@ -309,7 +336,8 @@ void stm_write_char(void *addr, char new)
 	GET_TX(tx);
 	
 	if (stm_validate_tx(tx)) {
-		//TODO
+		PRINT_DEBUG("TX: %d TID: %d Write Validate fail\n",
+			tx->version, tx->tid);
 		return;
 	}
 	
@@ -321,23 +349,26 @@ void stm_write_char(void *addr, char new)
 	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
 		if (enemy == tx) {
 			OREC_SET_NEW(rec, new);
-			PRINT_DEBUG("Write-Exist %3d to %16p\n", new, addr);
+			PRINT_DEBUG("TX: %d TID %d Write-Exist %3d to %16p\n",
+				tx->version, tx->tid, new, addr);
 			return;
 		}
 		if (stm_contention_manager(enemy) == STM_SELF_ABORT) {
-			//TODO
-			PRINT_DEBUG("TX %d SELF_ABORT\n", tx->version);
+			PRINT_DEBUG("TX: %d TID: %d ABORT SELF\n",
+				tx->version, tx->tid);
 			return;
 		}
 		else
-			PRINT_DEBUG("TX %d ENEMY_ABORT\n", tx->version);
+			PRINT_DEBUG("TX: %d TID: %d ABORT ENEMY\n",
+				tx->version, tx->tid);
 	}
 	
 	if (enemy == NULL) {
 		old = *(char *)addr;
 		OREC_SET_OLD(rec, old);
 		OREC_SET_NEW(rec, new);
-		PRINT_DEBUG("Write-New %3d to %16p\n", new, addr);
+		PRINT_DEBUG("TX: %d TID: %d Write-New %3d to %16p\n",
+			tx->version, tx->tid, new, addr);
 		
 		/* Update transaction write data set */
 		entry = (struct w_entry *)malloc(sizeof(struct w_entry));
@@ -351,6 +382,7 @@ void stm_write_char(void *addr, char new)
 		//Reclaim the owner of OREC
 		//TODO For simplicity, do nothing.
 		stm_abort();
+		PRINT_DEBUG("11abort\n");
 		return;
 	}
 }
@@ -374,6 +406,7 @@ int shint = 0x05060708;
 
 void *thread_func(void *arg)
 {
+	sleep(1);
 	printID();
 	
 	TM_THREAD_INIT();
@@ -390,6 +423,11 @@ void *thread_func(void *arg)
 
 	} __TM_END__
 
+	__TM_START__ {
+		TM_WRITE_CHAR(shc, 'B');
+		TM_COMMIT();
+	} __TM_END__
+
 	return (void *)0;
 }
 
@@ -399,11 +437,13 @@ int main(void)
 	pthread_t ntid;
 
 	printID();
-	for (i = 0; i < 2; i++) {
+	
+	for (i = 0; i < 5; i++) {
 		err = pthread_create(&ntid, NULL, thread_func, NULL);
 		if (err)
 			printf("Create thread %d failed\n", ntid);
 	}
-
+	
+	sleep(5);
 	return 0;
 }
