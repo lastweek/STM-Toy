@@ -1,19 +1,19 @@
 #include "atomic.h"
 #include "stm.h"
+
 /* 
- * NOTE THAT: 
- * Each thread only have one transaction descriptor instance.
- * All transactions in a thread _share_ a global descriptpor.
- * I choose to design like that for simplicity, which leads to
- * transactions can not nest.
+ * Each thread only has one transaction descriptor instance.
+ * All transactions in a thread _share_ a global descriptpor,
+ * they use the global descriptor in sequence.
  */
-
-
 DEF_THREAD_LOCAL(struct stm_tx *, thread_tx);
 
 struct orec	oa[4];
 int cnt=0;
 
+//#################################################
+//	STM Internal
+//#################################################
 
 /**
  * add_after_head - add @new after @ws->head
@@ -42,7 +42,7 @@ static void add_after_head(struct write_set *ws, struct w_entry *new)
 }
 
 /*
- * hash_addr_to_orec
+ * stm_addr_to_orec
  * @addr: the addr used to hash
  * return: hashed orec in hashtable
  *
@@ -51,24 +51,39 @@ static void add_after_head(struct write_set *ws, struct w_entry *new)
  * After a transaction commit, hashtable should free
  * all transaction relevent records.
  */
-//FIXME
-static struct orec *hash_addr_to_orec(void *addr)
+//TODO
+static struct orec *
+stm_addr_to_orec(void *addr)
 {
 	return NULL;
 }
 
-#define DELAY_LOOPS	50
-void stm_wait(void)
+/*
+ * TX_MALLOC - malloc memory for object
+ * @size: object size need to malloc
+ * A wrapper for memory allocater.
+ */
+//TODO
+struct stm_tx *TX_MALLOC(size_t size)
 {
-	int i;
-	for (i = 0; i < DELAY_LOOPS; i++) {
-		asm ("nop":::"memory");//Compiler Barrier
-	}
+	void *memptr;
+	
+	memptr = valloc(size);
+	memset(memptr, 0, size);
+	return (struct stm_tx *)memptr;
 }
 
+/*
+ * stm_current_tsp - Get TimeStamp
+ */
+//TODO
+static int stm_current_tsp(void)
+{
+	return 0;
+}
 
 //#################################################
-// 
+//	STM Interface
 //#################################################
 
 void stm_init(void)
@@ -79,27 +94,6 @@ void stm_init(void)
 void stm_thread_init(void)
 {
 	thread_tx = NULL;
-}
-
-/*
- *	Allocate _aligned_ tx descriptor
- *	and zero it up.
- */
-struct stm_tx *TX_MALLOC(size_t size)
-{
-	void *memptr;
-	
-	//TODO
-	memptr = valloc(size);
-	
-	memset(memptr, 0, size);
-	return (struct stm_tx *)memptr;
-}
-
-//TODO
-int current_tsp(void)
-{
-	return 0;
 }
 
 /*
@@ -118,7 +112,7 @@ void stm_start(void)
 	new_tx = TX_MALLOC(sizeof(struct stm_tx));
 	new_tx->status = STM_ACTIVE;
 	new_tx->version = 0;
-	new_tx->start_tsp = current_tsp();
+	new_tx->start_tsp = stm_current_tsp();
 	tls_set_tx(new_tx);
 }
 
@@ -239,7 +233,7 @@ char stm_read_char(void *addr)
 	}
 	
 	//FIXME Get the ownership record
-	rec = hash_addr_to_orec(addr);
+	rec = stm_addr_to_orec(addr);
 	rec = &oa[cnt%4]; cnt++;
 	
 	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {
@@ -305,7 +299,7 @@ void stm_write_char(void *addr, char new)
 	}
 	
 	//FIXME Get the ownership record
-	rec = hash_addr_to_orec(addr);
+	rec = stm_addr_to_orec(addr);
 	rec = &oa[cnt%4]; cnt++;
 	
 	if (enemy = atomic_cmpxchg(&rec->owner, NULL, tx)) {

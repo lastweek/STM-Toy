@@ -192,7 +192,6 @@ struct orec {
 	char pad[2];
 };
 
-void stm_wait(void);
 void stm_start(void);
 void stm_abort(void);
 int stm_commit(void);
@@ -219,6 +218,16 @@ static inline void stm_barrier(void)
 {
 	asm volatile ("mfence":::"memory");
 }
+
+#define DELAY_LOOPS	50
+static inline void stm_wait(void)
+{
+	int i;
+	for (i = 0; i < DELAY_LOOPS; i++) {
+		asm ("nop":::"memory");//Compiler Barrier
+	}
+}
+
 
 static inline void
 OREC_SET_OWNER(struct orec *r, struct stm_tx *t)
