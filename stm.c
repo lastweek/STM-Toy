@@ -1,5 +1,5 @@
+#include "atomic.h"
 #include "stm.h"
-
 /* 
  * NOTE THAT: 
  * Each thread only have one transaction descriptor instance.

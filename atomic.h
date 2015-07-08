@@ -36,8 +36,8 @@ static inline void atomic_or(atomic_t *p, int mask)
 {
 	asm volatile (
 		"lock ; orl %1, %0"
-		: "=m" (*addr)
-		: "r" (mask), "0" (*addr)
+		: "=m" (*p)
+		: "r" (mask), "m" (*p)
 	);
 }
 
@@ -48,11 +48,13 @@ static inline void atomic_or(atomic_t *p, int mask)
  * Compare @OLD with @MEM, if identical, store @NEW in memory.
  * Success is indicated by comparing @RETURN with @OLD
  */
-static inline int atomic_cmpxchg(atomic_t *p, int old, int new)
-{
+#define atomic_cmpxchg(ptr, old, new)  __cmpxchg(ptr, old, new, sizeof(*(ptr)))
 
-}
-
+#define __cmpxchg(ptr, old, new, size)	\
+({	\
+	__typeof__(*(ptr)) __ret;	\
+	__ret;	\
+})
 
 
 

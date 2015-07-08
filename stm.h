@@ -165,7 +165,7 @@ struct write_set {
  */
 typedef struct stm_tx {
 	jmp_buf jb;
-	volatile int status;
+	int status;
 	int version;
 	struct read_set  rs;
 	struct write_set ws;
