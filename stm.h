@@ -7,8 +7,14 @@
 #include <string.h>
 #include <pthread.h>
 
-#define TM_DEBUG
-#define TM_STATISTICS
+#define STM_DEBUG
+#define STM_STATISTICS
+
+#ifdef STM_DEBUG
+#define PRINT_DEBUG(format, ...)	printf(format, ##__VA_ARGS__)
+#else
+#define PRINT_DEBUG(...)
+#endif
 
 /*
  *	STM API
@@ -23,9 +29,8 @@
  */
 #define __TM_START__					\
 	{									\
-		stm_tx_t *tx = tls_get_tx();	\
 		stm_start();					\
-		setjmp(tx->jb);					\
+		setjmp(thread_tx->jb);			\
 	}
 
 #define __TM_END__						\
@@ -34,8 +39,6 @@
 		if (!tx_committed()) {			\
 			longjmp(tx->jb, 1);			\
 		}								\
-		/* set end time maybe? */		\
-		/* add statistics maybe? */		\
 	}
 
 #define TM_THREAD_INIT()	stm_thread_init()
@@ -196,7 +199,8 @@ struct orec {
 #define DECLARE_THREAD_LOCAL(TYPE, NAME) extern __thread TYPE NAME
 #define GET_TX(tx)	struct stm_tx *tx = tls_get_tx()
 
-DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
+//DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
+extern struct stm_tx *thread_tx;
 
 void stm_start(void);
 void stm_abort(void);
@@ -254,6 +258,18 @@ static inline void
 OREC_SET_NEW(struct orec *r, char new)
 {
 	r->new = new;
+}
+
+static inline char
+OREC_GET_OLD(struct orec *r)
+{
+	return r->old;
+}
+
+static inline char
+OREC_GET_NEW(struct orec *r)
+{
+	return r->new;
 }
 
 static inline void
