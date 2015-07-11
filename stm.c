@@ -5,9 +5,9 @@
  * All transactions in a thread _share_ a global descriptpor,
  */
 
-DEFINE_THREAD_LOCAL(struct stm_tx *, thread_tx);
+DEFINE_PER_THREAD(struct stm_tx *, thread_tx);
 
-struct orec	oa[4];
+struct orec oa[4];
 int cnt=0;
 
 //#################################################

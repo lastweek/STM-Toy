@@ -10,11 +10,12 @@
  * but are not automatically handled this way.
  */
 
-typedef int atomic_t;
 typedef unsigned char		u8;
 typedef unsigned short		u16;
 typedef unsigned int		u32;
 typedef unsigned long long	u64;
+
+typedef int atomic_t;
 
 static inline char atomic_read_char(atomic_t *p)
 {
@@ -36,20 +37,20 @@ static inline void atomic_write(atomic_t *p, int val)
 	*p = val;
 }
 
+#define LOCK_PREFIX	"lock; "
+
 static inline void atomic_inc(atomic_t *p)
 {
-	asm volatile (
-		"lock ; incl %0"
+	asm volatile (LOCK_PREFIX "incl %0"
 		: "+m"(*p)
 	);
 }
 
 static inline void atomic_or(atomic_t *p, int mask)
 {
-	asm volatile (
-		"lock ; orl %1, %0"
-		: "=m" (*p)
-		: "r" (mask), "m" (*p)
+	asm volatile (LOCK_PREFIX "orl %1, %0"
+		: "+m" (*p)
+		: "r" (mask)
 	);
 }
 
@@ -60,6 +61,7 @@ static inline void atomic_or(atomic_t *p, int mask)
  * Compare @OLD with @MEM, if identical, store @NEW in memory.
  * Success is indicated by comparing @RETURN with @OLD
  */
+
 #define lock "lock; "
 #define atomic_cmpxchg(ptr, old, new)  __cmpxchg(ptr, old, new, sizeof(*(ptr)))
 #define __cmpxchg(ptr, old, new, size)					\

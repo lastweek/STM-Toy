@@ -28,56 +28,56 @@
  *	And, yes, the granularity is one single byte, each byte in TM
  *	has a ownership record depict itself.
  */
-#define __TM_START__					\
-	{									\
-		stm_start();					\
-		setjmp(thread_tx->jb);			\
+#define __TM_START__			\
+	{				\
+		stm_start();		\
+		setjmp(thread_tx->jb);	\
 	}
 
-#define __TM_END__						\
-	{									\
+#define __TM_END__				\
+	{					\
 		stm_tx_t *tx = tls_get_tx();	\
-		if (!tx_committed()) {			\
-			stm_restart();				\
-			longjmp(tx->jb, 1);			\
-		}								\
+		if (!tx_committed()) {		\
+			stm_restart();		\
+			longjmp(tx->jb, 1);	\
+		}				\
 	}
 
 #define TM_THREAD_INIT()	stm_thread_init()
-#define TM_INIT()			stm_init()
-#define TM_ABORT()			stm_abort()
-#define TM_COMMIT()			stm_commit()
+#define TM_INIT()		stm_init()
+#define TM_ABORT()		stm_abort()
+#define TM_COMMIT()		stm_commit()
 #define TM_VALIDATE()		stm_validate()
 #define TM_BARRIER()		stm_barrier()
 
 #define TM_READ_CHAR(a)		stm_read_char(&(a))
 #define TM_WRITE_CHAR(a,v)	stm_write_char(&(a),v)
 
-#define TM_READ(TMOBJECT)								\
-	({													\
-		int __i; char __c;								\
-		typeof(TMOBJECT)  __ret;						\
-		char *__retp = (char *)&(__ret);				\
-		char *__addr = (char *)&(TMOBJECT);				\
-		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
-			__c = stm_read_char(__addr);				\
-			*__retp = __c;								\
-			__addr++; __retp++; __i++;					\
-		}												\
-		__ret;											\
+#define TM_READ(TMOBJECT)					\
+	({							\
+		int __i; char __c;				\
+		typeof(TMOBJECT)  __ret;			\
+		char *__retp = (char *)&(__ret);		\
+		char *__addr = (char *)&(TMOBJECT);		\
+		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
+			__c = stm_read_char(__addr);		\
+			*__retp = __c;				\
+			__addr++; __retp++; __i++;		\
+		}						\
+		__ret;						\
 	})
 
-#define TM_WRITE(TMOBJECT, VALUE)						\
-	{													\
-		int __i; char __c;								\
-		typeof(TMOBJECT) __val = (VALUE);				\
-		char *__valp = (char *)&(__val);				\
-		char *__addr = (char *)&(TMOBJECT);				\
-		for (__i = 0; __i < sizeof(TMOBJECT); ) {		\
-			__c = *((char *)__valp);					\
-			stm_write_char(__addr, __c);				\
-			__addr++; __valp++; __i++;					\
-		}												\
+#define TM_WRITE(TMOBJECT, VALUE)				\
+	{							\
+		int __i; char __c;				\
+		typeof(TMOBJECT) __val = (VALUE);		\
+		char *__valp = (char *)&(__val);		\
+		char *__addr = (char *)&(TMOBJECT);		\
+		for (__i = 0; __i < sizeof(TMOBJECT); ) {	\
+			__c = *((char *)__valp);		\
+			stm_write_char(__addr, __c);		\
+			__addr++; __valp++; __i++;		\
+		}						\
 	}
 
 /*
@@ -198,11 +198,11 @@ struct orec {
 	char pad[2];
 };
 
-#define DEFINE_THREAD_LOCAL(TYPE, NAME)	__thread TYPE NAME
-#define DECLARE_THREAD_LOCAL(TYPE, NAME) extern __thread TYPE NAME
+#define DEFINE_PER_THREAD(TYPE, NAME)	__thread TYPE NAME
+#define DECLARE_PER_THREAD(TYPE, NAME) extern __thread TYPE NAME
 #define GET_TX(tx)	struct stm_tx *tx = tls_get_tx()
 
-DECLARE_THREAD_LOCAL(struct stm_tx *, thread_tx);
+DECLARE_PER_THREAD(struct stm_tx *, thread_tx);
 
 void stm_restart(void);
 void stm_start(void);
