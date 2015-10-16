@@ -53,3 +53,9 @@ Software Transactional Memory for Dynamic-Sized Data Structures
 
 [Minh 07]
 An Effective Hybrid Transactional Memory System with Strong Isolation Guarantees
+
+#Hardware Transactional Memory
+
+##READING
+[1] https://software.intel.com/en-us/blogs/2012/02/07/transactional-synchronization-in-haswell
+[2] ISCA 2015 Quantitative Comparison of Hardware Transactional Memory for Blue Gene/Q, zEnterprise EC12, Intel Core, and POWER8
