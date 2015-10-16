@@ -60,3 +60,7 @@ An Effective Hybrid Transactional Memory System with Strong Isolation Guarantees
 [1] https://software.intel.com/en-us/blogs/2012/02/07/transactional-synchronization-in-haswell
 
 [2] ISCA 2015 Quantitative Comparison of Hardware Transactional Memory for Blue Gene/Q, zEnterprise EC12, Intel Core, and POWER8
+
+[3] PACT 2012 Evaluation of Blue Gene/Q Hardware Support for. Transactional Memories
+
+[4] Read the references of papers listed above, you can find more to read.
